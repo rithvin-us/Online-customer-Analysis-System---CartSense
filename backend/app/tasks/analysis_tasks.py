@@ -17,8 +17,6 @@ import uuid as uuid_module
 from datetime import datetime, timezone
 from typing import Any
 
-from celery import shared_task
-
 from app.core.config import settings
 from app.core.db import session_scope
 from app.core.logging import get_logger
@@ -31,6 +29,7 @@ from app.models import (
     RunStatus,
 )
 from app.services import hadoop_jobs, hdfs, job_records, registry, yarn
+from app.tasks.celery_app import celery_app
 
 log = get_logger(__name__)
 
@@ -43,7 +42,7 @@ def _key(value: str | uuid_module.UUID) -> uuid_module.UUID:
     return value if isinstance(value, uuid_module.UUID) else uuid_module.UUID(str(value))
 
 
-@shared_task(name="cartscope.analysis.run", bind=True, max_retries=0)
+@celery_app.task(name="cartscope.analysis.run", bind=True, max_retries=0)
 def execute_run(self, run_id: str) -> dict[str, Any]:
     """Runs every analysis of one run."""
     run_pk = _key(run_id)

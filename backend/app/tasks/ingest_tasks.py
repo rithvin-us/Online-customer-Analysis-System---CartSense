@@ -24,8 +24,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from celery import shared_task
-
 from app.core.config import settings
 from app.core.db import session_scope
 from app.core.logging import get_logger
@@ -35,6 +33,7 @@ from app.services.hadoop_jobs import (
     GROUP_MULTIPLE_OUTPUTS,
     GROUP_VALIDATION_STAT,
 )
+from app.tasks.celery_app import celery_app
 
 log = get_logger(__name__)
 
@@ -73,7 +72,7 @@ def _fail(version_id: str, message: str) -> None:
     _set(version_id, status=VersionStatus.FAILED, error=message[:4000])
 
 
-@shared_task(name="cartscope.ingest.version", bind=True, max_retries=0)
+@celery_app.task(name="cartscope.ingest.version", bind=True, max_retries=0)
 def ingest_version(self, version_id: str) -> dict[str, Any]:
     """Profiles, stores and validates one dataset version."""
     log.info("ingesting dataset version %s", version_id)
@@ -242,7 +241,7 @@ def _classification_summary(stages: list[Any]) -> dict[str, int | None]:
     }
 
 
-@shared_task(name="cartscope.ingest.synthetic", bind=True, max_retries=0)
+@celery_app.task(name="cartscope.ingest.synthetic", bind=True, max_retries=0)
 def generate_synthetic_version(
     self,
     version_id: str,
