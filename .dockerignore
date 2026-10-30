@@ -1,0 +1,10 @@
+.git
+.gitignore
+**/node_modules
+**/.next
+mapreduce/target
+data
+docs
+*.log
+frontend/out
+**/__pycache__

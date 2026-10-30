@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+<!--
+  CartScope hdfs-site.xml template.
+
+  Two settings are deliberately non-default and matter for the project
+  demonstration:
+
+    * dfs.replication = 2 -- each block is stored on two of the three
+      DataNodes, which is what makes the DataNode report in the UI meaningful.
+    * dfs.blocksize    -- small by default (4 MiB) so that the UCI Online
+      Retail dataset is split across many blocks and therefore produces many
+      map input splits on a single development machine. Production clusters
+      would use 128 MiB or more.
+-->
+<configuration>
+
+  <property>
+    <name>dfs.replication</name>
+    <value>${CARTSCOPE_HDFS_REPLICATION}</value>
+  </property>
+
+  <property>
+    <name>dfs.blocksize</name>
+    <value>${CARTSCOPE_HDFS_BLOCK_SIZE}</value>
+  </property>
+
+  <property>
+    <name>dfs.namenode.fs-limits.min-block-size</name>
+    <value>1048576</value>
+    <description>
+      Lowered from the 1 MiB default guard so the demonstration profile may
+      use block sizes below the usual minimum if asked to.
+    </description>
+  </property>
+
+  <property>
+    <name>dfs.namenode.name.dir</name>
+    <value>file:///hadoop/dfs/name</value>
+    <description>Backed by a named Docker volume, never container storage.</description>
+  </property>
+
+  <property>
+    <name>dfs.datanode.data.dir</name>
+    <value>file:///hadoop/dfs/data</value>
+    <description>Backed by one named Docker volume per DataNode.</description>
+  </property>
+
+  <property>
+    <name>dfs.namenode.rpc-bind-host</name>
+    <value>0.0.0.0</value>
+  </property>
+  <property>
+    <name>dfs.namenode.servicerpc-bind-host</name>
+    <value>0.0.0.0</value>
+  </property>
+  <property>
+    <name>dfs.namenode.http-bind-host</name>
+    <value>0.0.0.0</value>
+  </property>
+
+  <!--
+    Clients (the Celery worker, the backend, MapReduce tasks) address
+    DataNodes by container hostname rather than by the container IP that the
+    NameNode happens to have recorded.
+  -->
+  <property>
+    <name>dfs.client.use.datanode.hostname</name>
+    <value>true</value>
+  </property>
+  <property>
+    <name>dfs.datanode.use.datanode.hostname</name>
+    <value>true</value>
+  </property>
+
+  <property>
+    <name>dfs.permissions.enabled</name>
+    <value>true</value>
+  </property>
+  <property>
+    <name>dfs.webhdfs.enabled</name>
+    <value>true</value>
+    <description>Used by the backend to report HDFS state to the UI.</description>
+  </property>
+
+  <!-- DataNode health monitoring. -->
+  <property>
+    <name>dfs.heartbeat.interval</name>
+    <value>3</value>
+  </property>
+  <property>
+    <name>dfs.namenode.heartbeat.recheck-interval</name>
+    <value>30000</value>
+    <description>
+      A DataNode is marked stale/dead quickly (~1 minute rather than the
+      10 minute default) so that stopping a DataNode is visible in the UI
+      during a demonstration.
+    </description>
+  </property>
+  <property>
+    <name>dfs.namenode.avoid.read.stale.datanode</name>
+    <value>true</value>
+  </property>
+  <property>
+    <name>dfs.namenode.avoid.write.stale.datanode</name>
+    <value>true</value>
+  </property>
+
+  <property>
+    <name>dfs.datanode.du.reserved</name>
+    <value>1073741824</value>
+    <description>Keep 1 GiB free per DataNode volume on the dev machine.</description>
+  </property>
+
+  <property>
+    <name>dfs.namenode.safemode.threshold-pct</name>
+    <value>0.9f</value>
+  </property>
+
+</configuration>

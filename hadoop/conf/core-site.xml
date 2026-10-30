@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+<!--
+  CartScope core-site.xml template.
+  Rendered by hadoop/entrypoint.sh with envsubst at container start.
+-->
+<configuration>
+
+  <property>
+    <name>fs.defaultFS</name>
+    <value>hdfs://${CARTSCOPE_NAMENODE_HOST}:8020</value>
+    <description>Single logical HDFS for the whole CartScope cluster.</description>
+  </property>
+
+  <property>
+    <name>hadoop.tmp.dir</name>
+    <value>/hadoop/tmp</value>
+  </property>
+
+  <property>
+    <name>fs.trash.interval</name>
+    <value>0</value>
+    <description>
+      Trash is disabled. CartScope never deletes successful analytical output,
+      so the only deletes are of failed scratch directories.
+    </description>
+  </property>
+
+  <property>
+    <name>hadoop.http.staticuser.user</name>
+    <value>hadoop</value>
+  </property>
+
+  <!--
+    The backend API and the Celery worker talk to HDFS and YARN as the same
+    POSIX user that owns the daemons, so no impersonation is required. The
+    proxyuser entries below exist only so that the WebHDFS and YARN REST
+    endpoints used by the UI can read on behalf of the UI user.
+  -->
+  <property>
+    <name>hadoop.proxyuser.hadoop.hosts</name>
+    <value>*</value>
+  </property>
+  <property>
+    <name>hadoop.proxyuser.hadoop.groups</name>
+    <value>*</value>
+  </property>
+
+  <property>
+    <name>ipc.client.connect.max.retries</name>
+    <value>20</value>
+    <description>Containers start in parallel; tolerate a slow NameNode.</description>
+  </property>
+  <property>
+    <name>ipc.client.connect.retry.interval</name>
+    <value>2000</value>
+  </property>
+
+</configuration>

@@ -1,0 +1,20 @@
+# Build output
+mapreduce/target/
+frontend/.next/
+frontend/node_modules/
+frontend/out/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# Downloaded and generated data. The UCI archive and the CSVs derived from it
+# are fetched by `make dataset`; they are not source.
+data/uci-download/
+data/*.csv
+data/*.xlsx
+data/synthetic/
+
+# Local logs
+*.log

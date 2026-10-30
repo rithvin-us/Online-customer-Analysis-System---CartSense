@@ -1,0 +1,362 @@
+# ---------------------------------------------------------------------------
+# CartScope: Distributed Retail Intelligence Platform
+#
+# A 13-container stack: a real multi-node Apache Hadoop cluster (1 NameNode,
+# 3 DataNodes, 1 ResourceManager, 3 NodeManagers, 1 JobHistoryServer) plus the
+# application tier (FastAPI, Celery worker, PostgreSQL, Redis, Next.js) and a
+# Hadoop client container for manual inspection.
+#
+# All thirteen containers run on a single physical machine. The DataNodes and
+# NodeManagers are genuinely independent processes with their own storage and
+# their own YARN resource budgets, and work is genuinely distributed between
+# them, but they are not separate computers. See docs/ARCHITECTURE.md.
+# ---------------------------------------------------------------------------
+
+x-hadoop-image: &hadoop-image
+  image: cartscope/hadoop:${HADOOP_VERSION}
+  build:
+    context: .
+    dockerfile: hadoop/Dockerfile
+    args:
+      HADOOP_VERSION: ${HADOOP_VERSION}
+
+# Cluster-wide Hadoop settings handed to every container, including the
+# backend and the Celery worker, so that every Hadoop client in the stack
+# resolves the same NameNode and ResourceManager.
+x-hadoop-env: &hadoop-env
+  CARTSCOPE_NAMENODE_HOST: namenode
+  CARTSCOPE_RM_HOST: resourcemanager
+  CARTSCOPE_HISTORY_HOST: historyserver
+  CARTSCOPE_HDFS_REPLICATION: ${CARTSCOPE_HDFS_REPLICATION}
+  CARTSCOPE_HDFS_BLOCK_SIZE: ${CARTSCOPE_HDFS_BLOCK_SIZE}
+  CARTSCOPE_NM_MEMORY_MB: ${CARTSCOPE_NM_MEMORY_MB}
+  CARTSCOPE_NM_VCORES: ${CARTSCOPE_NM_VCORES}
+  CARTSCOPE_MAP_MEMORY_MB: ${CARTSCOPE_MAP_MEMORY_MB}
+  CARTSCOPE_MAP_HEAP_MB: ${CARTSCOPE_MAP_HEAP_MB}
+  CARTSCOPE_REDUCE_MEMORY_MB: ${CARTSCOPE_REDUCE_MEMORY_MB}
+  CARTSCOPE_REDUCE_HEAP_MB: ${CARTSCOPE_REDUCE_HEAP_MB}
+  CARTSCOPE_AM_MEMORY_MB: ${CARTSCOPE_AM_MEMORY_MB}
+  CARTSCOPE_AM_HEAP_MB: ${CARTSCOPE_AM_HEAP_MB}
+  HADOOP_USER_NAME: hadoop
+
+x-restart: &restart
+  restart: unless-stopped
+
+services:
+
+  # =========================================================================
+  # HDFS
+  # =========================================================================
+  namenode:
+    <<: [*hadoop-image, *restart]
+    container_name: cartscope-namenode
+    hostname: namenode
+    command: ["namenode"]
+    environment:
+      <<: *hadoop-env
+      HADOOP_HEAPSIZE_MAX: 1024
+    ports:
+      - "${NAMENODE_UI_PORT}:9870"
+    volumes:
+      - namenode-meta:/hadoop/dfs/name
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/cartscope-healthcheck", "namenode"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 40s
+    networks: [cartscope]
+
+  datanode1:
+    <<: [*hadoop-image, *restart]
+    container_name: cartscope-datanode1
+    hostname: datanode1
+    command: ["datanode"]
+    environment: &datanode-env
+      <<: *hadoop-env
+      HADOOP_HEAPSIZE_MAX: 512
+    volumes:
+      - datanode1-data:/hadoop/dfs/data
+    depends_on:
+      namenode:
+        condition: service_started
+    healthcheck: &datanode-health
+      test: ["CMD", "/usr/local/bin/cartscope-healthcheck", "datanode"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 30s
+    networks: [cartscope]
+
+  datanode2:
+    <<: [*hadoop-image, *restart]
+    container_name: cartscope-datanode2
+    hostname: datanode2
+    command: ["datanode"]
+    environment: *datanode-env
+    volumes:
+      - datanode2-data:/hadoop/dfs/data
+    depends_on:
+      namenode:
+        condition: service_started
+    healthcheck: *datanode-health
+    networks: [cartscope]
+
+  datanode3:
+    <<: [*hadoop-image, *restart]
+    container_name: cartscope-datanode3
+    hostname: datanode3
+    command: ["datanode"]
+    environment: *datanode-env
+    volumes:
+      - datanode3-data:/hadoop/dfs/data
+    depends_on:
+      namenode:
+        condition: service_started
+    healthcheck: *datanode-health
+    networks: [cartscope]
+
+  # =========================================================================
+  # YARN
+  # =========================================================================
+  resourcemanager:
+    <<: [*hadoop-image, *restart]
+    container_name: cartscope-resourcemanager
+    hostname: resourcemanager
+    command: ["resourcemanager"]
+    environment:
+      <<: *hadoop-env
+      HADOOP_HEAPSIZE_MAX: 1024
+    ports:
+      - "${RESOURCEMANAGER_UI_PORT}:8088"
+    depends_on:
+      namenode:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/cartscope-healthcheck", "resourcemanager"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 30s
+    networks: [cartscope]
+
+  nodemanager1:
+    <<: [*hadoop-image, *restart]
+    container_name: cartscope-nodemanager1
+    hostname: nodemanager1
+    command: ["nodemanager"]
+    environment: &nodemanager-env
+      <<: *hadoop-env
+      HADOOP_HEAPSIZE_MAX: 512
+    depends_on:
+      resourcemanager:
+        condition: service_started
+    healthcheck: &nodemanager-health
+      test: ["CMD", "/usr/local/bin/cartscope-healthcheck", "nodemanager"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 30s
+    networks: [cartscope]
+
+  nodemanager2:
+    <<: [*hadoop-image, *restart]
+    container_name: cartscope-nodemanager2
+    hostname: nodemanager2
+    command: ["nodemanager"]
+    environment: *nodemanager-env
+    depends_on:
+      resourcemanager:
+        condition: service_started
+    healthcheck: *nodemanager-health
+    networks: [cartscope]
+
+  nodemanager3:
+    <<: [*hadoop-image, *restart]
+    container_name: cartscope-nodemanager3
+    hostname: nodemanager3
+    command: ["nodemanager"]
+    environment: *nodemanager-env
+    depends_on:
+      resourcemanager:
+        condition: service_started
+    healthcheck: *nodemanager-health
+    networks: [cartscope]
+
+  historyserver:
+    <<: [*hadoop-image, *restart]
+    container_name: cartscope-historyserver
+    hostname: historyserver
+    command: ["historyserver"]
+    environment:
+      <<: *hadoop-env
+      HADOOP_HEAPSIZE_MAX: 512
+    ports:
+      - "${HISTORYSERVER_UI_PORT}:19888"
+    depends_on:
+      namenode:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/cartscope-healthcheck", "historyserver"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 30s
+    networks: [cartscope]
+
+  # A configured Hadoop client with no daemon, for manual verification:
+  #   docker compose exec hadoop-client hdfs dfs -ls -R /cartscope
+  hadoop-client:
+    <<: [*hadoop-image, *restart]
+    container_name: cartscope-hadoop-client
+    hostname: hadoop-client
+    command: ["client"]
+    environment: *hadoop-env
+    depends_on:
+      namenode:
+        condition: service_started
+    networks: [cartscope]
+
+  # =========================================================================
+  # Application datastores
+  # =========================================================================
+  postgres:
+    image: postgres:${POSTGRES_VERSION}-alpine
+    <<: *restart
+    container_name: cartscope-postgres
+    hostname: postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "${POSTGRES_HOST_PORT}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [cartscope]
+
+  redis:
+    image: redis:${REDIS_VERSION}-alpine
+    <<: *restart
+    container_name: cartscope-redis
+    hostname: redis
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_HOST_PORT}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [cartscope]
+
+  # =========================================================================
+  # Application tier
+  #
+  # The API and the worker share one image. That image is built on the Hadoop
+  # base image, so both contain a fully configured Hadoop client and the
+  # compiled MapReduce jar. The worker is what actually invokes
+  # `hadoop jar ... ` and `hdfs dfs ...`.
+  # =========================================================================
+  api:
+    image: cartscope/backend:latest
+    <<: *restart
+    build: &backend-build
+      context: .
+      dockerfile: backend/Dockerfile
+      args:
+        HADOOP_VERSION: ${HADOOP_VERSION}
+    container_name: cartscope-api
+    hostname: api
+    command: ["api"]
+    environment: &backend-env
+      <<: *hadoop-env
+      CARTSCOPE_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      CARTSCOPE_REDIS_URL: redis://redis:6379/0
+      CARTSCOPE_MAX_UPLOAD_MB: ${CARTSCOPE_MAX_UPLOAD_MB}
+      CARTSCOPE_DEFAULT_REDUCERS: ${CARTSCOPE_DEFAULT_REDUCERS}
+      CARTSCOPE_LOG_LEVEL: ${CARTSCOPE_LOG_LEVEL}
+      CARTSCOPE_NAMENODE_UI: http://namenode:9870
+      CARTSCOPE_RM_UI: http://resourcemanager:8088
+      CARTSCOPE_HISTORY_UI: http://historyserver:19888
+      CARTSCOPE_MR_JAR: /opt/cartscope/cartscope-mapreduce.jar
+    ports:
+      - "${API_HOST_PORT}:8000"
+    volumes:
+      - uploads:/var/lib/cartscope/uploads
+      - joblogs:/var/lib/cartscope/joblogs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      namenode:
+        condition: service_started
+    networks: [cartscope]
+
+  worker:
+    image: cartscope/backend:latest
+    <<: *restart
+    build: *backend-build
+    container_name: cartscope-worker
+    hostname: worker
+    command: ["worker"]
+    environment: *backend-env
+    volumes:
+      - uploads:/var/lib/cartscope/uploads
+      - joblogs:/var/lib/cartscope/joblogs
+    depends_on:
+      api:
+        condition: service_started
+      resourcemanager:
+        condition: service_started
+    networks: [cartscope]
+
+  frontend:
+    image: cartscope/frontend:latest
+    <<: *restart
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: ${FRONTEND_TARGET:-runner}
+    container_name: cartscope-frontend
+    hostname: frontend
+    environment:
+      # Browser-side calls go to the host-published API port; server-side
+      # rendering calls the API over the internal Docker network.
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:${API_HOST_PORT}
+      CARTSCOPE_INTERNAL_API_URL: http://api:8000
+      NODE_ENV: production
+    ports:
+      - "${FRONTEND_HOST_PORT}:3000"
+    depends_on:
+      api:
+        condition: service_started
+    networks: [cartscope]
+
+# ---------------------------------------------------------------------------
+# Persistent storage. Hadoop metadata, HDFS block storage, the application
+# database and uploaded datasets all live in named volumes, never in the
+# containers' writable layers.
+# ---------------------------------------------------------------------------
+volumes:
+  namenode-meta:
+  datanode1-data:
+  datanode2-data:
+  datanode3-data:
+  postgres-data:
+  redis-data:
+  uploads:
+  joblogs:
+
+networks:
+  cartscope:
+    name: cartscope
+    driver: bridge
