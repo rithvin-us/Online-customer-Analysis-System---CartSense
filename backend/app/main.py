@@ -20,6 +20,7 @@ from app.api import benchmarks, catalog, cluster, datasets, health, runs
 from app.core.config import settings
 from app.core.logging import configure_logging, get_logger
 from app.services import hdfs
+from app.tasks.celery_app import celery_app  # noqa: F401
 
 log = get_logger(__name__)
 

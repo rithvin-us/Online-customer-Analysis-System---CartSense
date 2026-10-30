@@ -293,6 +293,15 @@ def detect_encoding(path: Path) -> str:
     """First candidate encoding that decodes a sample of the file."""
     with path.open("rb") as handle:
         sample = handle.read(_SAMPLE_BYTES)
+    if sample.startswith(b"PK\x03\x04"):
+        raise ProfilingError(
+            "the uploaded file is a ZIP or Excel (.xlsx) workbook, not a CSV file; "
+            "convert it to CSV before uploading (e.g. using 'scripts/xlsx_to_csv.py')"
+        )
+    if b"\x00" in sample:
+        raise ProfilingError(
+            "the uploaded file contains binary null bytes and is not a valid text CSV"
+        )
     for encoding in CANDIDATE_ENCODINGS:
         try:
             sample.decode(encoding)

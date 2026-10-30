@@ -46,6 +46,17 @@ def _get(url: str, *, timeout: float = _TIMEOUT) -> dict[str, Any]:
         raise HadoopServiceError(f"{url} did not return JSON") from not_json
 
 
+def _as_list(value: Any) -> list[Any]:
+    """Hadoop REST APIs return a dict for single-element lists and a list for multiple."""
+    if not value:
+        return []
+    if isinstance(value, list):
+        return value
+    if isinstance(value, dict):
+        return [value]
+    return []
+
+
 # ---------------------------------------------------------------------------
 # ResourceManager
 # ---------------------------------------------------------------------------
@@ -84,7 +95,7 @@ def cluster_metrics() -> dict[str, Any]:
 
 def node_managers() -> list[dict[str, Any]]:
     """One entry per NodeManager, with its own resource budget and usage."""
-    payload = _get(f"{settings.rm_ui}/ws/v1/cluster/nodes").get("nodes", {}).get("node", [])
+    payload = _as_list(_get(f"{settings.rm_ui}/ws/v1/cluster/nodes").get("nodes", {}).get("node"))
     nodes = []
     for node in payload:
         nodes.append(
@@ -256,10 +267,10 @@ def history_job(job_id: str) -> dict[str, Any]:
 
 def history_counters(job_id: str) -> list[dict[str, Any]]:
     payload = _get(f"{settings.history_ui}/ws/v1/history/mapreduce/jobs/{job_id}/counters")
-    groups = (payload.get("jobCounters") or {}).get("counterGroup") or []
+    groups = _as_list((payload.get("jobCounters") or {}).get("counterGroup"))
     result = []
     for group in groups:
-        counters = group.get("counter") or []
+        counters = _as_list(group.get("counter"))
         result.append(
             {
                 "name": group.get("counterGroupName"),
@@ -286,7 +297,7 @@ def task_placement(job_id: str, *, max_tasks: int = 400) -> list[dict[str, Any]]
     """
     payload = _get(f"{settings.history_ui}/ws/v1/history/mapreduce/jobs/{job_id}/tasks",
                    timeout=30.0)
-    tasks = (payload.get("tasks") or {}).get("task") or []
+    tasks = _as_list((payload.get("tasks") or {}).get("task"))
     placements: list[dict[str, Any]] = []
 
     for task in tasks[:max_tasks]:
@@ -301,7 +312,7 @@ def task_placement(job_id: str, *, max_tasks: int = 400) -> list[dict[str, Any]]
             )
         except HadoopServiceError:
             continue
-        attempts = (attempts_payload.get("taskAttempts") or {}).get("taskAttempt") or []
+        attempts = _as_list((attempts_payload.get("taskAttempts") or {}).get("taskAttempt"))
         for attempt in attempts:
             node = attempt.get("nodeHttpAddress") or ""
             placements.append(

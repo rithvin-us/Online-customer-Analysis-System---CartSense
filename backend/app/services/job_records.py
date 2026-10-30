@@ -123,6 +123,8 @@ def counter_value(
             continue
         groups = (job.counters or {}).get("groups") or {}
         value = groups.get(group, {}).get(name)
+        if value is None and not name.endswith("/part"):
+            value = groups.get(group, {}).get(f"{name}/part")
         if value is None:
             continue
         total = value if total is None else total + value
