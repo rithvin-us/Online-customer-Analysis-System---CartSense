@@ -10,6 +10,10 @@ const badgeVariants = cva(
       variant: {
         default: "border-border bg-muted text-muted-foreground",
         outline: "border-border text-foreground",
+        // For a state that is simply normal. The icon beside it carries the
+        // meaning; a filled green pill on every healthy row means nothing
+        // leads, and the one failing row stops standing out.
+        quiet: "border-border/70 bg-transparent text-muted-foreground",
         success: "border-success/30 bg-success/10 text-success",
         warning: "border-warning/30 bg-warning/10 text-warning",
         danger: "border-destructive/30 bg-destructive/10 text-destructive",

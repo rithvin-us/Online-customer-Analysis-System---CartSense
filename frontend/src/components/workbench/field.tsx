@@ -14,7 +14,7 @@ export function Field({
 }) {
   return (
     <div className={cn("min-w-0", className)}>
-      <dt className="text-2xs font-medium uppercase tracking-wide text-muted-foreground">
+      <dt className="text-2xs font-medium text-muted-foreground">
         {label}
       </dt>
       <dd className="mt-0.5 truncate text-sm tabular" title={hint}>

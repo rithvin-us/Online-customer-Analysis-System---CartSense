@@ -39,10 +39,10 @@ export function Nav() {
   const pathname = usePathname();
 
   return (
-    <nav className="flex flex-col gap-5" aria-label="Main">
+    <nav className="flex flex-col gap-6" aria-label="Main">
       {SECTIONS.map((section) => (
         <div key={section.label}>
-          <p className="px-2.5 pb-1.5 text-2xs font-medium uppercase tracking-wide text-muted-foreground/80">
+          <p className="px-2.5 pb-2 text-2xs font-medium text-muted-foreground/80">
             {section.label}
           </p>
           <ul className="space-y-0.5">

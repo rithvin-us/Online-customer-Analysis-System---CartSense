@@ -528,7 +528,7 @@ export function DonutChart({
           <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
             <span className="text-lg font-bold tracking-tight text-foreground">{centerValue}</span>
             {centerLabel && (
-              <span className="text-3xs font-medium uppercase tracking-wider text-muted-foreground">
+              <span className="text-3xs font-medium text-muted-foreground">
                 {centerLabel}
               </span>
             )}

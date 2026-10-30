@@ -69,9 +69,11 @@ export function formatDuration(milliseconds: number | null | undefined): string 
   if (milliseconds === null || milliseconds === undefined || Number.isNaN(milliseconds)) {
     return ABSENT;
   }
-  if (milliseconds < 1000) return `${Math.round(milliseconds)} ms`;
+  // One shape for every duration on the screen: a number and a unit, no space,
+  // so a column of them aligns and 49.6s sits under 5m 20s without a jog.
+  if (milliseconds < 1000) return `${Math.round(milliseconds)}ms`;
   const totalSeconds = milliseconds / 1000;
-  if (totalSeconds < 60) return `${totalSeconds.toFixed(1)} s`;
+  if (totalSeconds < 60) return `${totalSeconds.toFixed(1)}s`;
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = Math.round(totalSeconds % 60);
   if (minutes < 60) return `${minutes}m ${String(seconds).padStart(2, "0")}s`;

@@ -17,7 +17,7 @@ type Variant = React.ComponentProps<typeof Badge>["variant"];
 const RUN: Record<RunStatus, { label: string; variant: Variant; icon: typeof CheckCircle2 }> = {
   PENDING: { label: "Queued", variant: "default", icon: Hourglass },
   RUNNING: { label: "Running", variant: "info", icon: Loader2 },
-  SUCCEEDED: { label: "Succeeded", variant: "success", icon: CheckCircle2 },
+  SUCCEEDED: { label: "Succeeded", variant: "quiet", icon: CheckCircle2 },
   PARTIAL: { label: "Partial", variant: "warning", icon: AlertTriangle },
   FAILED: { label: "Failed", variant: "danger", icon: XCircle },
   CANCELLED: { label: "Cancelled", variant: "default", icon: CircleSlash },
@@ -31,7 +31,7 @@ const VERSION: Record<
   PROFILING: { label: "Profiling", variant: "info", icon: Loader2 },
   UPLOADING_TO_HDFS: { label: "Writing to HDFS", variant: "info", icon: Loader2 },
   VALIDATING: { label: "Validating", variant: "info", icon: Loader2 },
-  READY: { label: "Ready", variant: "success", icon: CheckCircle2 },
+  READY: { label: "Ready", variant: "quiet", icon: CheckCircle2 },
   FAILED: { label: "Failed", variant: "danger", icon: XCircle },
 };
 
@@ -52,9 +52,16 @@ export function StatusPill({
   const Icon = entry.icon;
   const spinning = Icon === Loader2;
 
+  // In the quiet variant the tick is the only coloured thing, so a screen full
+  // of healthy rows reads as calm and a failed one is the one row with colour.
+  const quiet = entry.variant === "quiet";
+
   return (
     <Badge variant={entry.variant} className={cn("gap-1", className)}>
-      <Icon className={cn("size-3", spinning && "animate-spin")} aria-hidden />
+      <Icon
+        className={cn("size-3", spinning && "animate-spin", quiet && "text-success")}
+        aria-hidden
+      />
       {entry.label}
     </Badge>
   );
