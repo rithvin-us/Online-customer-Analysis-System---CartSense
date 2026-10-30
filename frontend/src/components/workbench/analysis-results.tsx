@@ -6,9 +6,14 @@ import { Button } from "@/components/ui/button";
 import { ResultTable } from "./result-table";
 import { ErrorState, LoadingRow } from "./states";
 import {
+  CountryMarketShareChart,
+  LoyaltyBreakdownChart,
+  MonthlyOrderVolumeChart,
   MonthlyRevenueChart,
   SegmentChart,
+  SegmentShareChart,
   TopCountriesChart,
+  TopCustomerOrdersChart,
   TopCustomersChart,
   TopProductsChart,
 } from "./charts";
@@ -101,11 +106,12 @@ export function AnalysisResults({
         <ErrorState message={page.error} />
       ) : page.data ? (
         <div className={page.refreshing ? "opacity-60 transition-opacity" : undefined}>
-          {renderChart(analysis, outputName ?? "", chartSource.data?.rows ?? [])}
-          {analysis === "repeat_customers" && outputName === "summary" && (
-            <LoyaltySummary rows={page.data.rows} />
+          {renderChart(
+            analysis,
+            outputName ?? "",
+            chartSource.data?.rows?.length ? chartSource.data.rows : page.data.rows,
           )}
-          <div className="overflow-hidden rounded-md border border-border">
+          <div className="mt-4 overflow-hidden rounded-md border border-border">
             <ResultTable
               page={page.data}
               offset={offset}
@@ -148,7 +154,8 @@ type ChartKind =
   | "products_revenue"
   | "products_quantity"
   | "products_returns"
-  | "segments";
+  | "segments"
+  | "loyalty";
 
 function chartKind(analysis: string, output: string): ChartKind | null {
   if (analysis === "monthly_sales" && output === "by_month") return "monthly";
@@ -162,6 +169,7 @@ function chartKind(analysis: string, output: string): ChartKind | null {
     if (output === "ranked_by_quantity_returned") return "products_returns";
   }
   if (analysis === "rfm_analysis" && output === "by_segment") return "segments";
+  if (analysis === "repeat_customers" && output === "summary") return "loyalty";
   return null;
 }
 
@@ -176,19 +184,46 @@ function renderChart(
   const chart = (() => {
     switch (kind) {
       case "monthly":
-        return <MonthlyRevenueChart rows={rows} />;
+        return (
+          <div className="space-y-4">
+            <MonthlyRevenueChart rows={rows} />
+            <MonthlyOrderVolumeChart rows={rows} />
+          </div>
+        );
       case "countries":
-        return <TopCountriesChart rows={rows} />;
+        return (
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <TopCountriesChart rows={rows} />
+            <CountryMarketShareChart rows={rows} />
+          </div>
+        );
       case "customers":
-        return <TopCustomersChart rows={rows} />;
+        return (
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <TopCustomersChart rows={rows} />
+            <TopCustomerOrdersChart rows={rows} />
+          </div>
+        );
+      case "segments":
+        return (
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <SegmentChart rows={rows} />
+            <SegmentShareChart rows={rows} />
+          </div>
+        );
+      case "loyalty":
+        return (
+          <div className="grid grid-cols-1 items-center gap-4 lg:grid-cols-2">
+            <LoyaltyBreakdownChart rows={rows} />
+            <LoyaltySummary rows={rows} />
+          </div>
+        );
       case "products_revenue":
         return <TopProductsChart rows={rows} metric="net_revenue" />;
       case "products_quantity":
         return <TopProductsChart rows={rows} metric="quantity_sold" />;
       case "products_returns":
         return <TopProductsChart rows={rows} metric="quantity_returned" />;
-      case "segments":
-        return <SegmentChart rows={rows} />;
       default:
         return null;
     }

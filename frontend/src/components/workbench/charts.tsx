@@ -1,11 +1,16 @@
 "use client";
 
 import {
+  Area,
+  AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
+  Cell,
   Line,
   LineChart,
+  Pie,
+  PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -13,6 +18,7 @@ import {
 } from "recharts";
 
 import { formatCompact, formatCurrency, formatInteger } from "@/lib/format";
+import { summariseMetrics } from "@/lib/summary";
 import { cn } from "@/lib/utils";
 
 /**
@@ -36,6 +42,18 @@ const SERIES = {
   two: "hsl(var(--series-2))",
   three: "hsl(var(--series-3))",
 } as const;
+
+export const PALETTE = [
+  "hsl(var(--series-1))",
+  "hsl(var(--series-3))",
+  "hsl(var(--series-2))",
+  "hsl(270 65% 58%)",
+  "hsl(330 75% 55%)",
+  "hsl(45 90% 48%)",
+  "hsl(190 85% 42%)",
+  "hsl(140 60% 45%)",
+  "hsl(215 25% 60%)",
+] as const;
 
 const GRID = "hsl(var(--chart-grid))";
 const AXIS_INK = "hsl(var(--chart-axis))";
@@ -432,6 +450,306 @@ export function TopCustomersChart({ rows, limit = 10 }: { rows: Row[]; limit?: n
       data={data}
       valueLabel="Net spending"
       format={formatCurrency}
+      labelWidth={90}
+    />
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Extended Visualizations (Donuts, Volume Areas, Orders Breakdown)
+// ---------------------------------------------------------------------------
+
+export function DonutChart({
+  title,
+  note,
+  data,
+  format,
+  centerLabel,
+  centerValue,
+  height = 240,
+}: {
+  title: string;
+  note?: string;
+  data: { label: string; value: number; color?: string; percent?: number }[];
+  format: (value: number) => string;
+  centerLabel?: string;
+  centerValue?: string;
+  height?: number;
+}) {
+  if (data.length === 0) return null;
+  const items = data.map((d, i) => ({
+    ...d,
+    color: d.color || PALETTE[i % PALETTE.length]!,
+  }));
+
+  return (
+    <ChartFrame title={title} note={note} height={height}>
+      <Legend
+        items={items.map((item) => ({
+          label: `${item.label} (${item.percent !== undefined ? `${item.percent.toFixed(1)}%` : format(item.value)})`,
+          color: item.color,
+        }))}
+      />
+      <div className="relative h-[calc(100%-28px)]">
+        <ResponsiveContainer width="100%" height="100%">
+          <PieChart margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
+            <Pie
+              data={items}
+              dataKey="value"
+              nameKey="label"
+              cx="50%"
+              cy="50%"
+              innerRadius={50}
+              outerRadius={80}
+              paddingAngle={3}
+              isAnimationActive={false}
+            >
+              {items.map((entry, index) => (
+                <Cell key={`cell-${index}`} fill={entry.color} stroke={SURFACE} strokeWidth={2} />
+              ))}
+            </Pie>
+            <Tooltip
+              content={({ active, payload }) => {
+                if (!active || !payload || payload.length === 0) return null;
+                const d = payload[0]?.payload as { label: string; value: number; percent?: number };
+                return (
+                  <div className="rounded-md border border-border bg-surface-raised px-2.5 py-1.5 shadow-md text-2xs">
+                    <p className="font-medium text-foreground">{d.label}</p>
+                    <p className="text-muted-foreground">
+                      {format(d.value)} {d.percent !== undefined && `(${d.percent.toFixed(1)}%)`}
+                    </p>
+                  </div>
+                );
+              }}
+            />
+          </PieChart>
+        </ResponsiveContainer>
+        {centerValue && (
+          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+            <span className="text-lg font-bold tracking-tight text-foreground">{centerValue}</span>
+            {centerLabel && (
+              <span className="text-3xs font-medium uppercase tracking-wider text-muted-foreground">
+                {centerLabel}
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+    </ChartFrame>
+  );
+}
+
+/** Customer retention & loyalty breakdown for repeat_customers summary. */
+export function LoyaltyBreakdownChart({ rows }: { rows: Row[] }) {
+  const metrics = summariseMetrics(rows);
+  const repeat = metrics.repeat_customers || 0;
+  const single = metrics.customers_with_single_completed_invoice || 0;
+  const zero = metrics.customers_without_completed_invoice || 0;
+  const total = repeat + single + zero;
+
+  if (total === 0) return null;
+
+  const data = [
+    {
+      label: "Repeat (2+ orders)",
+      value: repeat,
+      color: "hsl(var(--series-3))",
+      percent: (repeat / total) * 100,
+    },
+    {
+      label: "Single Order",
+      value: single,
+      color: "hsl(var(--series-1))",
+      percent: (single / total) * 100,
+    },
+    {
+      label: "Never Purchased",
+      value: zero,
+      color: "hsl(var(--series-2))",
+      percent: (zero / total) * 100,
+    },
+  ].filter((d) => d.value > 0);
+
+  const rate = metrics.repeat_customer_percentage;
+
+  return (
+    <DonutChart
+      title="Customer Retention Breakdown"
+      note="Distribution of identified customers by completed purchase count."
+      data={data}
+      format={formatInteger}
+      centerValue={rate !== null ? `${Number(rate).toFixed(1)}%` : undefined}
+      centerLabel="Repeat Rate"
+      height={220}
+    />
+  );
+}
+
+/** Geographic market share breakdown (% net revenue). */
+export function CountryMarketShareChart({ rows, limit = 5 }: { rows: Row[]; limit?: number }) {
+  const topRows = rows.slice(0, limit);
+  const remainingRows = rows.slice(limit);
+
+  const totalRevenue = rows.reduce((acc, r) => acc + numeric(r, "net_revenue"), 0);
+  if (totalRevenue <= 0) return null;
+
+  const topItems = topRows.map((row, i) => {
+    const val = numeric(row, "net_revenue");
+    return {
+      label: text(row, "country"),
+      value: val,
+      color: PALETTE[i % PALETTE.length]!,
+      percent: (val / totalRevenue) * 100,
+    };
+  });
+
+  const otherRevenue = remainingRows.reduce((acc, r) => acc + numeric(r, "net_revenue"), 0);
+  if (otherRevenue > 0) {
+    topItems.push({
+      label: "Other Countries",
+      value: otherRevenue,
+      color: "hsl(215 25% 60%)",
+      percent: (otherRevenue / totalRevenue) * 100,
+    });
+  }
+
+  return (
+    <DonutChart
+      title="Geographic Market Share"
+      note={`Top ${limit} countries vs remainder of world by net revenue.`}
+      data={topItems}
+      format={formatCurrency}
+      centerValue={topItems[0] ? `${topItems[0].percent?.toFixed(0)}%` : undefined}
+      centerLabel={topItems[0]?.label}
+      height={240}
+    />
+  );
+}
+
+/** Monetary value share across RFM segments. */
+export function SegmentShareChart({ rows }: { rows: Row[] }) {
+  const totalRev = rows.reduce((acc, r) => acc + numeric(r, "total_monetary"), 0);
+  if (totalRev <= 0) return null;
+
+  const data = rows
+    .map((row, i) => {
+      const val = numeric(row, "total_monetary");
+      return {
+        label: text(row, "segment"),
+        value: val,
+        color: PALETTE[i % PALETTE.length]!,
+        percent: (val / totalRev) * 100,
+      };
+    })
+    .sort((a, b) => b.value - a.value);
+
+  return (
+    <DonutChart
+      title="Segment Revenue Contribution"
+      note="Distribution of total monetary value across customer segments."
+      data={data}
+      format={formatCurrency}
+      centerValue={formatCompact(totalRev)}
+      centerLabel="Total Value"
+      height={240}
+    />
+  );
+}
+
+/** Monthly completed order count and physical units sold. */
+export function MonthlyOrderVolumeChart({ rows }: { rows: Row[] }) {
+  const data = rows.map((row) => ({
+    month: text(row, "month"),
+    orders: numeric(row, "completed_invoices"),
+    items: numeric(row, "quantity_sold"),
+  }));
+
+  if (data.length === 0) return null;
+
+  return (
+    <ChartFrame
+      title="Monthly Order & Item Volume"
+      note="Distinct completed invoices and total physical units sold per month."
+      height={200}
+    >
+      <Legend
+        items={[
+          { label: "Completed orders", color: SERIES.one },
+          { label: "Units sold", color: SERIES.two },
+        ]}
+      />
+      <ResponsiveContainer width="100%" height="84%">
+        <AreaChart data={data} margin={{ top: 4, right: 46, bottom: 4, left: 4 }}>
+          <CartesianGrid stroke={GRID} strokeWidth={1} vertical={false} />
+          <XAxis
+            dataKey="month"
+            tick={AXIS_TICK}
+            stroke={GRID}
+            tickLine={false}
+            interval="preserveStartEnd"
+            minTickGap={16}
+          />
+          <YAxis
+            tick={AXIS_TICK}
+            stroke={GRID}
+            tickLine={false}
+            width={48}
+            tickFormatter={(value: number) => formatCompact(value)}
+          />
+          <Tooltip
+            cursor={{ stroke: AXIS_INK, strokeWidth: 1 }}
+            content={({ active, label, payload }) => (
+              <TooltipCard
+                active={active}
+                label={label}
+                payload={payload as TooltipDatum[]}
+                format={formatInteger}
+              />
+            )}
+          />
+          <Area
+            type="monotone"
+            dataKey="orders"
+            name="Completed orders"
+            stroke={SERIES.one}
+            fill={SERIES.one}
+            fillOpacity={0.2}
+            strokeWidth={2}
+          />
+          <Area
+            type="monotone"
+            dataKey="items"
+            name="Units sold"
+            stroke={SERIES.two}
+            fill={SERIES.two}
+            fillOpacity={0.12}
+            strokeWidth={2}
+          />
+        </AreaChart>
+      </ResponsiveContainer>
+    </ChartFrame>
+  );
+}
+
+/** Orders placed by the highest-spending customers. */
+export function TopCustomerOrdersChart({ rows, limit = 10 }: { rows: Row[]; limit?: number }) {
+  const data = rows.slice(0, limit).map((row) => {
+    const id = text(row, "customer_id");
+    return {
+      label: id,
+      full: `Customer ${id}`,
+      value: numeric(row, "total_orders"),
+    };
+  });
+
+  return (
+    <RankedBars
+      title={`Orders by Top ${data.length} Customers`}
+      note="Completed order count for each of the top spending customers."
+      data={data}
+      valueLabel="Orders"
+      format={formatInteger}
+      color={SERIES.three}
       labelWidth={90}
     />
   );
