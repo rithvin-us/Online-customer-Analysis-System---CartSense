@@ -69,8 +69,16 @@ def _summary(run: AnalysisRun) -> RunSummary:
     )
 
 
+def _clean_tracking_url(url: str | None) -> str | None:
+    if not url:
+        return None
+    return url.replace("resourcemanager:8088", "localhost:8088").replace("historyserver:19888", "localhost:19888")
+
+
 def _job_out(job: JobExecution) -> JobExecutionOut:
-    return JobExecutionOut.model_validate(job)
+    out = JobExecutionOut.model_validate(job)
+    out.tracking_url = _clean_tracking_url(out.tracking_url)
+    return out
 
 
 def _execution_out(execution: AnalysisExecution) -> AnalysisExecutionOut:
@@ -245,6 +253,7 @@ def get_stage(
         )
 
     detail = JobExecutionDetail.model_validate(job)
+    detail.tracking_url = _clean_tracking_url(detail.tracking_url)
     if job.task_attempts:
         detail.placement_summary = yarn.placement_summary(job.task_attempts)
     if live and job.application_id:

@@ -256,9 +256,17 @@ function AnalysisPanel({
                   Counters, placement and logs as the cluster reported them.
                 </CardDescription>
               </div>
-              {stageDetail.data?.tracking_url && (
+              {(stageDetail.data?.application_id || stageDetail.data?.tracking_url) && (
                 <Button variant="ghost" size="xs" asChild>
-                  <a href={stageDetail.data.tracking_url} target="_blank" rel="noreferrer">
+                  <a
+                    href={
+                      stageDetail.data.application_id
+                        ? `http://localhost:8088/cluster/app/${stageDetail.data.application_id}`
+                        : stageDetail.data.tracking_url?.replace("resourcemanager:8088", "localhost:8088")
+                    }
+                    target="_blank"
+                    rel="noreferrer"
+                  >
                     <ExternalLink aria-hidden />
                     Open in YARN
                   </a>
