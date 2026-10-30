@@ -63,7 +63,7 @@ RUN set -eux; \
     chown -R hadoop:users /opt/cartscope /opt/venv /var/lib/cartscope; \
     # Fail the build rather than ship an image whose application cannot even be
     # imported. This needs no database: importing only builds the app object.
-    su hadoop -s /bin/bash -c 'cd /opt/cartscope && python3 -c "import app.main"'
+    su hadoop -s /bin/bash -c 'cd /opt/cartscope && /opt/venv/bin/python3 -c "import app.main"'
 
 USER hadoop
 
