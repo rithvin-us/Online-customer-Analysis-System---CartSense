@@ -126,15 +126,26 @@ def post_multipart(url: str, fields: dict[str, str], file_path: Path) -> Any:
 
 
 def ready_version(api: str) -> tuple[str, str] | None:
-    """An existing READY dataset version, if the stack already has one."""
+    """The largest READY dataset version the stack already holds.
+
+    Largest rather than newest: the distribution checks are only meaningful
+    against a dataset big enough to span several HDFS blocks, so if the stack
+    holds both a small fixture and a full dataset, the full one is the right
+    thing to verify against.
+    """
+    candidates: list[tuple[int, str, str]] = []
     for dataset in get(f"{api}/api/datasets"):
         detail = get(f"{api}/api/datasets/{dataset['id']}")
-        for version in sorted(
-            detail["versions"], key=lambda item: item["version_number"], reverse=True
-        ):
+        for version in detail["versions"]:
             if version["status"] == "READY":
-                return dataset["id"], version["id"]
-    return None
+                candidates.append(
+                    (version["validated_record_count"] or 0, dataset["id"], version["id"])
+                )
+    if not candidates:
+        return None
+    records, dataset_id, version_id = max(candidates)
+    print(f"    {len(candidates)} ready versions; using the largest ({records:,} records)")
+    return dataset_id, version_id
 
 
 def wait_for_version(api: str, dataset_id: str, version_id: str, timeout: int) -> dict[str, Any]:
@@ -307,13 +318,28 @@ def main() -> int:
     storage = get(f"{api}/api/datasets/{dataset_id}/versions/{version_id}/storage")
     blocks = storage.get("raw_block_locations") or []
     hosts = {host for block in blocks for host in block["hosts"]}
+    block_size = storage["block_size"]
+    raw_bytes = version["size_bytes"]
+    expected_blocks = max(1, -(-raw_bytes // block_size))
+
     checks.record(
-        "the raw file is split across several HDFS blocks",
-        len(blocks) > 1,
-        f"{len(blocks)} blocks",
+        "the raw file occupies the expected number of HDFS blocks",
+        len(blocks) == expected_blocks,
+        f"{len(blocks)} blocks for {raw_bytes:,} bytes at a {block_size:,} byte block size",
     )
+    if expected_blocks > 1:
+        checks.record(
+            "the raw file is split across several blocks, so the input can be split",
+            len(blocks) > 1,
+            f"{len(blocks)} blocks",
+        )
+    else:
+        print(
+            "    (the file is smaller than one block, so a multi-block split is "
+            "not applicable; use a larger dataset to exercise it)"
+        )
     checks.record(
-        "blocks are replicated across DataNodes",
+        "every block is replicated across DataNodes",
         len(hosts) >= 2 and all(len(block["hosts"]) >= 2 for block in blocks),
         f"{len(hosts)} distinct DataNodes hold them",
     )
@@ -367,9 +393,13 @@ def main() -> int:
             all(job["map_input_records"] is not None for job in jobs),
             f"first stage read {jobs[0]['map_input_records']:,} records",
         )
+        # More than one map task requires more than one input split, which
+        # requires validated data larger than one block. Below that the honest
+        # assertion is that at least one map task ran.
+        minimum_maps = 2 if expected_blocks > 1 else 1
         checks.record(
-            f"{analysis}: the input was split across several map tasks",
-            (jobs[0]["launched_map_tasks"] or 0) > 1,
+            f"{analysis}: the input was read by {minimum_maps} or more map tasks",
+            (jobs[0]["launched_map_tasks"] or 0) >= minimum_maps,
             f"{jobs[0]['launched_map_tasks']} map tasks in {jobs[0]['stage']}",
         )
         checks.record(
@@ -388,9 +418,13 @@ def main() -> int:
         stage = jobs[0]["stage"]
         detail = get(f"{api}/api/runs/{run_id}/analyses/{analysis}/jobs/{stage}")
         placement = detail.get("placement_summary") or {}
+        # A single-split job runs one map task, which lands on one worker; the
+        # reduce tasks are what spread it. Require two hosts only where the
+        # data gives the scheduler something to spread.
+        minimum_hosts = 2 if expected_blocks > 1 else 1
         checks.record(
-            f"{analysis}: work ran on more than one worker container",
-            (placement.get("distinct_hosts") or 0) >= 2,
+            f"{analysis}: work ran on {minimum_hosts} or more worker containers",
+            (placement.get("distinct_hosts") or 0) >= minimum_hosts,
             f"{placement.get('distinct_hosts')} hosts: {', '.join(placement.get('hosts') or [])}",
         )
 
