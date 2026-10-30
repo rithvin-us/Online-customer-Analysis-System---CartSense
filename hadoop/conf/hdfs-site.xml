@@ -6,9 +6,9 @@
   Two settings are deliberately non-default and matter for the project
   demonstration:
 
-    * dfs.replication = 2 -- each block is stored on two of the three
+    * dfs.replication = 2: each block is stored on two of the three
       DataNodes, which is what makes the DataNode report in the UI meaningful.
-    * dfs.blocksize    -- small by default (4 MiB) so that the UCI Online
+    * dfs.blocksize: small by default (4 MiB) so that the UCI Online
       Retail dataset is split across many blocks and therefore produces many
       map input splits on a single development machine. Production clusters
       would use 128 MiB or more.

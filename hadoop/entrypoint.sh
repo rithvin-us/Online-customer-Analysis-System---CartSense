@@ -44,18 +44,13 @@ export CARTSCOPE_NAMENODE_HOST CARTSCOPE_RM_HOST CARTSCOPE_HISTORY_HOST \
 log() { printf '[cartscope-hadoop][%s] %s\n' "$ROLE" "$*" >&2; }
 
 render_config() {
-  local template rendered
-  # Only CartScope's own variables are substituted. Hadoop configuration
-  # values legitimately contain $HADOOP_HOME and $HADOOP_CONF_DIR, which must
-  # survive rendering and be expanded later by Hadoop itself.
-  local vars='${CARTSCOPE_NAMENODE_HOST} ${CARTSCOPE_RM_HOST} ${CARTSCOPE_HISTORY_HOST} ${CARTSCOPE_HDFS_REPLICATION} ${CARTSCOPE_HDFS_BLOCK_SIZE} ${CARTSCOPE_NM_MEMORY_MB} ${CARTSCOPE_NM_VCORES} ${CARTSCOPE_MAP_MEMORY_MB} ${CARTSCOPE_REDUCE_MEMORY_MB} ${CARTSCOPE_AM_MEMORY_MB} ${CARTSCOPE_MAP_HEAP_MB} ${CARTSCOPE_REDUCE_HEAP_MB} ${CARTSCOPE_AM_HEAP_MB}'
-
-  for template in "$HADOOP_HOME"/etc/hadoop-templates/*.xml; do
-    [ -e "$template" ] || continue
-    rendered="$HADOOP_CONF_DIR/$(basename "$template")"
-    envsubst "$vars" < "$template" > "$rendered"
-  done
-  log "rendered configuration (replication=${CARTSCOPE_HDFS_REPLICATION}, block=${CARTSCOPE_HDFS_BLOCK_SIZE} bytes)"
+  # The renderer substitutes an explicit allowlist of CartScope variables and
+  # leaves every other $ alone, because Hadoop configuration values
+  # legitimately contain $HADOOP_HOME and $HADOOP_CONF_DIR and Hadoop expands
+  # those itself at runtime.
+  python3 /usr/local/bin/cartscope-render-config \
+    "$HADOOP_HOME/etc/hadoop-templates" "$HADOOP_CONF_DIR"
+  log "configuration rendered (replication=${CARTSCOPE_HDFS_REPLICATION}, block=${CARTSCOPE_HDFS_BLOCK_SIZE} bytes)"
 }
 
 wait_for_port() {

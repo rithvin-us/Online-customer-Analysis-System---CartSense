@@ -1,0 +1,9 @@
+# The build installs from the lockfile and compiles in the image, so a
+# local node_modules or .next would only slow the context upload down and
+# risk shipping host-built artefacts.
+node_modules
+.next
+out
+Dockerfile
+.dockerignore
+*.log

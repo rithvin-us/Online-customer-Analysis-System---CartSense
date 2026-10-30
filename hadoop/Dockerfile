@@ -1,81 +1,97 @@
 # syntax=docker/dockerfile:1.7
 # ---------------------------------------------------------------------------
-# CartScope Hadoop base image.
+# CartScope Hadoop image.
 #
-# A single image serves every cluster role (namenode, datanode,
-# resourcemanager, nodemanager, historyserver, client). The role is chosen at
-# runtime by the first argument to the entrypoint, which keeps the cluster
-# definition in docker-compose.yml instead of spread across six Dockerfiles.
+# Built on the official Apache Hadoop image, `apache/hadoop:3.5.0`, published by
+# the Apache Hadoop project itself. That image was verified before adopting it:
 #
-# Hadoop 3.5.0 officially supports Java 17 as a runtime, so the image is built
-# on the Temurin 17 JDK (the JDK rather than the JRE, because the MapReduce
-# tooling and jps-based health checks expect a full JDK).
+#   $ docker run --rm --entrypoint bash apache/hadoop:3.5.0 -c 'hadoop version'
+#   Hadoop 3.5.0
+#   Compiled by cnauroth on 2026-03-24T16:56Z
+#
+#   base OS : Ubuntu 24.04 LTS
+#   JVM     : Temurin 17.0.18  (Hadoop 3.5.0 supports Java 17 as a runtime)
+#   layout  : the full distribution under /opt/hadoop, user `hadoop` (uid 1001)
+#
+# One image serves every cluster role — namenode, datanode, resourcemanager,
+# nodemanager, historyserver, client — chosen at run time by the first argument
+# to the entrypoint. That keeps the cluster's shape in docker-compose.yml rather
+# than spread across six near-identical Dockerfiles.
+#
+# This build installs no packages and downloads nothing: the base image already
+# carries bash, curl, netcat, procps and python3, and the configuration renderer
+# is written in Python precisely so that `envsubst` is not needed. The image
+# therefore builds offline and reproducibly.
 # ---------------------------------------------------------------------------
-FROM eclipse-temurin:17-jdk-noble AS hadoop-dist
-
 ARG HADOOP_VERSION=3.5.0
-ARG HADOOP_SHA512=04ab94496cc00c8b7a28d03f6308eff8d2a4e7f37a9da5e8e086e4d6fc990e7a94d661908f6a6136039536efb362614b8aecdef185b5fb8ed588f0b152c7aa16
-ARG HADOOP_URL=https://dlcdn.apache.org/hadoop/common/hadoop-${HADOOP_VERSION}/hadoop-${HADOOP_VERSION}.tar.gz
-ARG HADOOP_ARCHIVE_URL=https://archive.apache.org/dist/hadoop/common/hadoop-${HADOOP_VERSION}/hadoop-${HADOOP_VERSION}.tar.gz
-
-RUN set -eux; \
-    apt-get update; \
-    apt-get install -y --no-install-recommends ca-certificates curl; \
-    rm -rf /var/lib/apt/lists/*; \
-    # The primary CDN only keeps current releases; fall back to the archive.
-    curl -fsSL -o /tmp/hadoop.tar.gz "${HADOOP_URL}" \
-      || curl -fsSL -o /tmp/hadoop.tar.gz "${HADOOP_ARCHIVE_URL}"; \
-    echo "${HADOOP_SHA512}  /tmp/hadoop.tar.gz" | sha512sum -c -; \
-    mkdir -p /opt/hadoop; \
-    tar -xzf /tmp/hadoop.tar.gz -C /opt/hadoop --strip-components=1; \
-    rm -f /tmp/hadoop.tar.gz; \
-    # Trim the distribution: documentation, sources and the bundled
-    # cloud-connector jars are not used by this project.
-    rm -rf /opt/hadoop/share/doc \
-           /opt/hadoop/share/hadoop/*/sources \
-           /opt/hadoop/share/hadoop/tools/lib/aws-java-sdk-bundle-*.jar \
-           /opt/hadoop/share/hadoop/tools/lib/azure-storage-*.jar
-
-# ---------------------------------------------------------------------------
-FROM eclipse-temurin:17-jdk-noble
+FROM apache/hadoop:${HADOOP_VERSION}
 
 ARG HADOOP_VERSION=3.5.0
 
 LABEL org.opencontainers.image.title="CartScope Hadoop" \
-      org.opencontainers.image.description="Apache Hadoop ${HADOOP_VERSION} base image for the CartScope cluster" \
-      org.opencontainers.image.version="${HADOOP_VERSION}"
+      org.opencontainers.image.description="Apache Hadoop ${HADOOP_VERSION} configured for the CartScope cluster" \
+      org.opencontainers.image.version="${HADOOP_VERSION}" \
+      org.opencontainers.image.base.name="apache/hadoop:${HADOOP_VERSION}"
 
-RUN set -eux; \
-    apt-get update; \
-    apt-get install -y --no-install-recommends \
-        bash ca-certificates curl gettext-base netcat-openbsd procps tini; \
-    rm -rf /var/lib/apt/lists/*; \
-    groupadd -r hadoop --gid 1100; \
-    useradd -r -g hadoop --uid 1100 --create-home --shell /bin/bash hadoop
-
-COPY --from=hadoop-dist --chown=hadoop:hadoop /opt/hadoop /opt/hadoop
+USER root
 
 ENV HADOOP_HOME=/opt/hadoop \
     HADOOP_VERSION=${HADOOP_VERSION} \
     HADOOP_CONF_DIR=/opt/hadoop/etc/hadoop \
     HADOOP_LOG_DIR=/opt/hadoop/logs \
     HADOOP_USER_NAME=hadoop \
-    JAVA_HOME=/opt/java/openjdk \
     PATH=/opt/hadoop/bin:/opt/hadoop/sbin:/opt/java/openjdk/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-# Configuration templates. envsubst renders them at container start so that a
-# single image can serve a differently sized cluster without a rebuild.
+# Configuration templates, rendered at container start so that one image can
+# serve a differently sized cluster without a rebuild.
 COPY hadoop/conf/ /opt/hadoop/etc/hadoop-templates/
+COPY hadoop/render_config.py /usr/local/bin/cartscope-render-config
 COPY hadoop/entrypoint.sh /usr/local/bin/cartscope-hadoop
 COPY hadoop/healthcheck.sh /usr/local/bin/cartscope-healthcheck
 
 RUN set -eux; \
-    chmod +x /usr/local/bin/cartscope-hadoop /usr/local/bin/cartscope-healthcheck; \
-    mkdir -p /opt/hadoop/logs /hadoop/dfs/name /hadoop/dfs/data /hadoop/yarn/local /hadoop/yarn/logs /opt/cartscope; \
-    chown -R hadoop:hadoop /opt/hadoop /hadoop /opt/cartscope
+    chmod +x /usr/local/bin/cartscope-render-config \
+             /usr/local/bin/cartscope-hadoop \
+             /usr/local/bin/cartscope-healthcheck; \
+    # Storage directories. Each is a mount point for a named volume at run
+    # time; creating them here fixes their ownership for the hadoop user.
+    mkdir -p /opt/hadoop/logs \
+             /hadoop/dfs/name /hadoop/dfs/data \
+             /hadoop/yarn/local /hadoop/yarn/logs \
+             /hadoop/tmp \
+             /opt/cartscope; \
+    chown -R hadoop:users /opt/hadoop/etc/hadoop /opt/hadoop/etc/hadoop-templates \
+                          /opt/hadoop/logs /hadoop /opt/cartscope; \
+    # Fail the build rather than ship an image whose Hadoop does not run.
+    su hadoop -s /bin/bash -c 'hadoop version' | head -1; \
+    # Render the templates with placeholder values and parse the result, so a
+    # malformed configuration file fails the build instead of crash-looping a
+    # container at start-up. Hadoop's XML parser is strict: an XML comment may
+    # not contain a double hyphen, which is easy to write by accident.
+    CARTSCOPE_NAMENODE_HOST=namenode \
+    CARTSCOPE_RM_HOST=resourcemanager \
+    CARTSCOPE_HISTORY_HOST=historyserver \
+    CARTSCOPE_HDFS_REPLICATION=2 \
+    CARTSCOPE_HDFS_BLOCK_SIZE=4194304 \
+    CARTSCOPE_NM_MEMORY_MB=2048 \
+    CARTSCOPE_NM_VCORES=2 \
+    CARTSCOPE_MAP_MEMORY_MB=512 \
+    CARTSCOPE_REDUCE_MEMORY_MB=512 \
+    CARTSCOPE_AM_MEMORY_MB=768 \
+    CARTSCOPE_MAP_HEAP_MB=410 \
+    CARTSCOPE_REDUCE_HEAP_MB=410 \
+    CARTSCOPE_AM_HEAP_MB=614 \
+      python3 /usr/local/bin/cartscope-render-config \
+        /opt/hadoop/etc/hadoop-templates /tmp/conf-check; \
+    python3 -c "\
+import glob, sys;\
+from xml.etree import ElementTree;\
+[ElementTree.parse(path) for path in sorted(glob.glob('/tmp/conf-check/*.xml'))];\
+print('configuration templates parse')"; \
+    rm -rf /tmp/conf-check
 
 USER hadoop
 WORKDIR /opt/cartscope
 
-ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/cartscope-hadoop"]
+ENTRYPOINT ["/usr/local/bin/cartscope-hadoop"]
 CMD ["client"]

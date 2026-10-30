@@ -5,7 +5,7 @@
 
   Uber mode is disabled explicitly. With uber mode on, a small job runs
   entirely inside the ApplicationMaster JVM and no separate map or reduce
-  containers are ever launched -- which would defeat the purpose of the
+  containers are ever launched, which would defeat the purpose of the
   project. Every CartScope job therefore launches real YARN containers.
 -->
 <configuration>

@@ -326,6 +326,10 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       target: ${FRONTEND_TARGET:-runner}
+      args:
+        # NEXT_PUBLIC_* values are inlined when the bundle is compiled, so the
+        # browser-facing API URL has to be known at build time, not run time.
+        NEXT_PUBLIC_API_BASE_URL: http://localhost:${API_HOST_PORT}
     container_name: cartscope-frontend
     hostname: frontend
     environment:
@@ -333,7 +337,6 @@ services:
       # rendering calls the API over the internal Docker network.
       NEXT_PUBLIC_API_BASE_URL: http://localhost:${API_HOST_PORT}
       CARTSCOPE_INTERNAL_API_URL: http://api:8000
-      NODE_ENV: production
     ports:
       - "${FRONTEND_HOST_PORT}:3000"
     depends_on:

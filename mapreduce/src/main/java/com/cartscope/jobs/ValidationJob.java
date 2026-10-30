@@ -139,6 +139,11 @@ public class ValidationJob extends AbstractAnalysis {
                 Text.class, NullWritable.class);
         MultipleOutputs.addNamedOutput(job, OUT_REJECTED, TextOutputFormat.class,
                 Text.class, NullWritable.class);
+        // With counters enabled, Hadoop reports exactly how many records each
+        // named output received. Those counters are what the product uses for
+        // the validated and rejected record counts, rather than the backend
+        // counting rows itself.
+        MultipleOutputs.setCountersEnabled(job, true);
 
         reporter.addSetting("cartscope.invoice.date.dayfirst",
                 getConf().get(InvoiceDateParser.CONF_DAY_FIRST, "false"));
