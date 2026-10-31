@@ -18,7 +18,11 @@ Hadoop reported:
 8. two independently computed Hadoop results agree: the net revenue totalled by
    the country analysis matches the net revenue totalled by the monthly
    analysis. Nothing in the backend could make those agree if the jobs were
-   wrong.
+   wrong;
+9. the product classification adds up: every classification dimension covers
+   each classified product exactly once, each dimension's bands account for the
+   whole sold catalogue's gross revenue, and the cumulative revenue share
+   finishes at 100%.
 
 Usage: python3 -I scripts/e2e_check.py [--api http://localhost:8000]
 """
@@ -195,6 +199,75 @@ def total(api: str, run_id: str, analysis: str, output: str, column: str) -> flo
         offset += page["returned"]
         if not page["has_more"] or page["returned"] == 0:
             return summed
+
+
+def all_rows(api: str, run_id: str, analysis: str, output: str) -> list[dict[str, Any]]:
+    """Reads a whole result by paging through it."""
+    rows: list[dict[str, Any]] = []
+    offset = 0
+    while True:
+        page = get(
+            f"{api}/api/runs/{run_id}/analyses/{analysis}/results/{output}"
+            f"?limit=5000&offset={offset}"
+        )
+        rows.extend(page["rows"])
+        offset += page["returned"]
+        if not page["has_more"] or page["returned"] == 0:
+            return rows
+
+
+def check_product_classification(api: str, run_id: str, checks: Any) -> None:
+    """The classification stages agree with each other and with the ranking.
+
+    Each check compares two files Hadoop wrote in two different stages. The
+    backend only labels and casts those files, so there is nothing between the
+    reducers and these assertions that could make a wrong number look right.
+    """
+    classified = all_rows(api, run_id, "product_analysis", "classified_products")
+    bands = all_rows(api, run_id, "product_analysis", "by_classification")
+    if not classified or not bands:
+        checks.record("product classification: both outputs are readable", False)
+        return
+
+    checks.record(
+        "product classification: the ranking is 1-based and gapless",
+        [row["rank"] for row in classified] == list(range(1, len(classified) + 1)),
+        f"{len(classified):,} classified products",
+    )
+
+    last = classified[-1]["cumulative_revenue_share_pct"]
+    checks.record(
+        "product classification: the cumulative revenue share reaches 100%",
+        abs(float(last) - 100.0) <= 0.05,
+        f"last row {last}%",
+    )
+
+    catalogue_gross = sum(float(row["gross_revenue"]) for row in classified)
+    dimensions: dict[str, list[dict[str, Any]]] = {}
+    for row in bands:
+        dimensions.setdefault(str(row["dimension"]), []).append(row)
+
+    checks.record(
+        "product classification: four dimensions were summarised",
+        set(dimensions) == {"abc_class", "price_band", "volume_band", "return_class"},
+        ", ".join(sorted(dimensions)),
+    )
+
+    for dimension, rows in sorted(dimensions.items()):
+        products = sum(int(row["products"]) for row in rows)
+        gross = sum(float(row["gross_revenue"]) for row in rows)
+        share = sum(float(row["revenue_share_pct"]) for row in rows)
+        checks.record(
+            f"product classification: {dimension} covers every product once",
+            products == len(classified),
+            f"{products:,} banded against {len(classified):,} classified",
+        )
+        checks.record(
+            f"product classification: {dimension} accounts for the whole catalogue",
+            abs(gross - catalogue_gross) <= max(1.0, catalogue_gross * 1e-6)
+            and abs(share - 100.0) <= 0.1,
+            f"gross={gross:,.2f} of {catalogue_gross:,.2f}, shares sum to {share:.2f}%",
+        )
 
 
 def main() -> int:
@@ -455,6 +528,11 @@ def main() -> int:
             f"country={country_total:,.2f} monthly={monthly_total:,.2f} "
             f"difference={difference:,.4f}",
         )
+
+    if "product_analysis" in completed:
+        print()
+        print("Product classification")
+        check_product_classification(api, run_id, checks)
 
     print()
     print(f"run: {api.replace('8000', '3000')}/runs/{run_id}")

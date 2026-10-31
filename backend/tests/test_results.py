@@ -117,3 +117,57 @@ def test_summarise_metric_rows() -> None:
 def test_blank_lines_are_ignored() -> None:
     output = registry.get_analysis("repeat_customers").output("summary")
     assert results.parse_rows([], output) == []
+
+
+def test_parses_a_classified_product_row() -> None:
+    # The layout the classify stage's reducer writes, in order.
+    output = registry.get_analysis("product_analysis").output("classified_products")
+    line = (
+        "1\t22423\t174156.49\t168469.6\t12347\t321\t853\t14.1\t2.53\t1.95\t1.95\t"
+        "A\t10.00 to 24.99\t5000 units and over\tModerate (2% to 10%)\t"
+        "REGENCY CAKESTAND 3 TIER"
+    )
+    rows = results.parse_rows([line], output)
+
+    assert rows == [
+        {
+            "rank": 1,
+            "stock_code": "22423",
+            "gross_revenue": 174156.49,
+            "net_revenue": 168469.6,
+            "quantity_sold": 12347,
+            "quantity_returned": 321,
+            "distinct_invoices": 853,
+            "average_unit_price": 14.1,
+            "return_rate_pct": 2.53,
+            "revenue_share_pct": 1.95,
+            "cumulative_revenue_share_pct": 1.95,
+            "abc_class": "A",
+            "price_band": "10.00 to 24.99",
+            "volume_band": "5000 units and over",
+            "return_class": "Moderate (2% to 10%)",
+            "description": "REGENCY CAKESTAND 3 TIER",
+        }
+    ]
+
+
+def test_parses_a_classification_band_row() -> None:
+    output = registry.get_analysis("product_analysis").output("by_classification")
+    line = "price_band\t2.50 to 4.99\t3\t1200\t30.5\t1234567\t4321\t456789.12\t450000.0\t25.4\t3.7"
+    rows = results.parse_rows([line], output)
+
+    assert rows == [
+        {
+            "dimension": "price_band",
+            "band": "2.50 to 4.99",
+            "ordinal": 3,
+            "products": 1200,
+            "product_share_pct": 30.5,
+            "quantity_sold": 1234567,
+            "quantity_returned": 4321,
+            "gross_revenue": 456789.12,
+            "net_revenue": 450000.0,
+            "revenue_share_pct": 25.4,
+            "average_unit_price": 3.7,
+        }
+    ]

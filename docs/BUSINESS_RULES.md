@@ -182,6 +182,84 @@ deterministic, which is what makes it safe to apply inside a combiner. A rule
 like "first one seen" would make the displayed product name depend on which
 combiner happened to run first, so two runs over identical data could disagree.
 
+### Product classification
+
+Products are classified by the `classify` stage of the product analysis. Only
+the products that **actually sold** are classified: a stock code seen only on
+reversal lines has no selling price and no revenue to classify, and is counted
+as `PRODUCTS_NEVER_SOLD_EXCLUDED` instead of being given figures it does not
+have.
+
+Two derived figures the classes are read from:
+
+| Term | Definition | Why it is defined this way |
+|---|---|---|
+| **Average unit price** | Gross revenue ÷ units sold | Not the `UnitPrice` column: one stock code is sold at several prices, so the only unit price reportable for a product without picking a line arbitrarily is the one its own sales imply. |
+| **Return rate** | Returned units ÷ (sold + returned units) | Divided by units *handled*, not units sold, so the figure stays within 0–100% for a product whose returns in the loaded period belong to sales made before it. |
+
+**Revenue shares are taken over gross revenue, not net.** A cumulative share has
+to be monotonic to mean anything, and net revenue is negative for a product whose
+returns outweigh its sales in the loaded period, so a cumulative net share could
+fall as it went down the ranking. Net revenue is reported beside the gross
+figure on every row.
+
+#### ABC revenue class (Pareto)
+
+Products are put in descending gross revenue order — ties broken by `StockCode`,
+so the ranking is reproducible — and classified by the cumulative revenue share
+reached **before** each product was added:
+
+| Cumulative share above the product | Class |
+|---|---|
+| under 80% | A |
+| 80% to under 95% | B |
+| 95% and over | C |
+
+Reading the rule aloud: *a product is A while the products above it have not yet
+accounted for 80% of revenue*. Taking the share before rather than after the
+product is what makes the highest earning product class A even in a catalogue of
+one.
+
+#### Price band
+
+By average unit price, in the dataset's currency:
+
+| Band | Average unit price |
+|---|---|
+| Under 1.00 | < 1.00 |
+| 1.00 to 2.49 | 1.00 – 2.49 |
+| 2.50 to 4.99 | 2.50 – 4.99 |
+| 5.00 to 9.99 | 5.00 – 9.99 |
+| 10.00 to 24.99 | 10.00 – 24.99 |
+| 25.00 and over | ≥ 25.00 |
+
+These are **fixed** boundaries, not population quintiles. That is the opposite
+decision from the RFM scores below, and for the opposite reason: what a shop
+charges for an item means something on its own scale — a 0.85 item is a cheap
+item whichever other products happen to be loaded beside it — whereas "a recent
+customer" only means recent *relative to the other customers*.
+
+#### Volume band
+
+By units sold: 1–9, 10–49, 50–199, 200–999, 1000–4999, 5000 and over.
+
+#### Return class
+
+| Class | Return rate |
+|---|---|
+| No returns | no returned units at all |
+| Low | > 0% and < 2% |
+| Moderate | 2% to 10% |
+| High | over 10% |
+
+"No returns" is its own class rather than the bottom of the low band, because
+*never came back* is a different statement about a product from *came back
+rarely*.
+
+A band nothing falls into is absent from the band summary rather than reported
+as a zero row, so the summary never asserts a band exists in a catalogue that
+has none.
+
 ### RFM scoring
 
 Scores are **population quintiles**, not fixed thresholds, so they adapt to

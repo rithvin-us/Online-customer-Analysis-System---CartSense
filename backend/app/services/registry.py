@@ -162,6 +162,78 @@ _PRODUCT_BY_PRODUCT = Output(
     default_sort="net_revenue",
 )
 
+#: The classification stage's row. Every class on it is a published rule
+#: applied by the Hadoop ``classify`` stage; see docs/BUSINESS_RULES.md.
+_PRODUCT_CLASSIFIED = Output(
+    name="classified_products",
+    title="Classified products",
+    description=(
+        "Products that actually sold, in descending gross revenue order, with "
+        "the ABC revenue class, price band, volume band and return class of each."
+    ),
+    columns=(
+        RANK_COLUMN,
+        Column("stock_code", "string", "Stock code"),
+        Column("gross_revenue", "float", "Gross revenue",
+               "Money taken for this product; the figure the revenue shares are built from",
+               unit="currency"),
+        Column("net_revenue", "float", "Net revenue", "Gross revenue less returns",
+               unit="currency"),
+        Column("quantity_sold", "integer", "Quantity sold", unit="quantity"),
+        Column("quantity_returned", "integer", "Quantity returned", unit="quantity"),
+        Column("distinct_invoices", "integer", "Distinct invoices",
+               "Orders this product appeared on", unit="count"),
+        Column("average_unit_price", "float", "Average unit price",
+               "Gross revenue divided by units sold: the price this product's own sales imply",
+               unit="currency"),
+        Column("return_rate_pct", "float", "Return rate",
+               "Returned units as a share of units handled (sold plus returned)",
+               unit="percent"),
+        Column("revenue_share_pct", "float", "Revenue share",
+               "This product's share of the sold catalogue's gross revenue", unit="percent"),
+        Column("cumulative_revenue_share_pct", "float", "Cumulative share",
+               "Gross revenue share of this product and every product above it",
+               unit="percent"),
+        Column("abc_class", "string", "ABC class",
+               "A while the products above have not reached 80% of revenue, B to 95%, else C"),
+        Column("price_band", "string", "Price band", "Band of the average unit price"),
+        Column("volume_band", "string", "Volume band", "Band of the units sold"),
+        Column("return_class", "string", "Return class", "Band of the return rate"),
+        Column("description", "string", "Description",
+               "Lexicographically smallest description seen for this stock code"),
+    ),
+    ranked=True,
+)
+
+#: One row per band of each classification dimension.
+_PRODUCT_BY_CLASSIFICATION = Output(
+    name="by_classification",
+    title="Classification bands",
+    description=(
+        "How many products, units and pounds sit in each band of each "
+        "classification. Four dimensions share the file; the dimension column "
+        "says which, and the ordinal is the band's reporting position."
+    ),
+    columns=(
+        Column("dimension", "string", "Dimension",
+               "abc_class, price_band, volume_band or return_class"),
+        Column("band", "string", "Band"),
+        Column("ordinal", "integer", "Position",
+               "Reporting position of the band within its dimension", unit="count"),
+        Column("products", "integer", "Products", unit="count"),
+        Column("product_share_pct", "float", "Share of products", unit="percent"),
+        Column("quantity_sold", "integer", "Quantity sold", unit="quantity"),
+        Column("quantity_returned", "integer", "Quantity returned", unit="quantity"),
+        Column("gross_revenue", "float", "Gross revenue", unit="currency"),
+        Column("net_revenue", "float", "Net revenue", unit="currency"),
+        Column("revenue_share_pct", "float", "Share of revenue",
+               "Share of the sold catalogue's gross revenue", unit="percent"),
+        Column("average_unit_price", "float", "Average unit price",
+               "The band's gross revenue divided by its units sold", unit="currency"),
+    ),
+    default_sort="ordinal",
+)
+
 _COUNTRY_BY_COUNTRY = Output(
     name="by_country",
     title="Countries",
@@ -256,7 +328,13 @@ ANALYSES: dict[str, Analysis] = {
         scope_note=(
             "Keyed on StockCode. Description is a label only and is collapsed with a "
             "deterministic rule, because one stock code carries several spellings in "
-            "the source data."
+            "the source data. The classification covers the products that actually "
+            "sold: a stock code seen only on reversal lines has no selling price and "
+            "no revenue to classify, and is counted as "
+            "PRODUCTS_NEVER_SOLD_EXCLUDED instead. Revenue shares are taken over "
+            "gross revenue, because a cumulative share must not fall as it goes down "
+            "the ranking, and net revenue is negative for a product whose returns "
+            "outweigh its sales in the loaded period."
         ),
         stages=(
             Stage("invoice-rollup", "Invoice roll-up",
@@ -265,6 +343,14 @@ ANALYSES: dict[str, Analysis] = {
             Stage("rank-revenue", "Rank by revenue", "Descending net revenue."),
             Stage("rank-quantity", "Rank by quantity", "Descending quantity sold."),
             Stage("rank-returns", "Rank by returns", "Descending returned quantity."),
+            Stage("rank-reach", "Rank by reach",
+                  "Descending number of distinct orders the product appeared on."),
+            Stage("classify", "Classify",
+                  "A single reducer walks the sold catalogue in revenue order and "
+                  "assigns the ABC class, price band, volume band and return class."),
+            Stage("band-summary", "Band summary",
+                  "Totals each band of each classification, and its share of the "
+                  "sold catalogue."),
         ),
         outputs=(
             _PRODUCT_BY_PRODUCT,
@@ -278,6 +364,13 @@ ANALYSES: dict[str, Analysis] = {
             _ranked(_PRODUCT_BY_PRODUCT, "ranked_by_quantity_returned",
                     "Products with the most returns",
                     "Products in descending order of returned units."),
+            _ranked(_PRODUCT_BY_PRODUCT, "ranked_by_distinct_invoices",
+                    "Products with the widest reach",
+                    "Products in descending order of the number of distinct orders "
+                    "they appeared on, which is a different question from how many "
+                    "units moved."),
+            _PRODUCT_CLASSIFIED,
+            _PRODUCT_BY_CLASSIFICATION,
         ),
     ),
     "country_analysis": Analysis(

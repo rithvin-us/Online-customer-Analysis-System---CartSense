@@ -188,16 +188,56 @@ sale_lines, return_lines`
 
 ---
 
-## `product_analysis` — five jobs
+## `product_analysis` — eight jobs
 
 1. **`invoice-rollup`** — group by `(stock_code, invoice_no)`, so "number of
    distinct invoices this product appeared on" is a count of groups rather than a
    count of lines. The description travels as the `Aggregate` label.
 2. **`product-rollup`** — one row per stock code.
-3. **`rank-revenue`**, **`rank-quantity`**, **`rank-returns`** — three orderings
-   of the same rows. The top ten by revenue, the top ten by units and the
-   products with the heaviest return activity are the first ten rows of those
-   three files.
+3. **`rank-revenue`**, **`rank-quantity`**, **`rank-returns`**, **`rank-reach`**
+   — four orderings of the same rows. The top ten by revenue, by units, by
+   returned units and by the number of distinct orders a product appeared on are
+   the first ten rows of those four files. Reach is a different question from
+   volume: one customer ordering five hundred of something is not the same event
+   as a hundred customers ordering five.
+4. **`classify`** — the products that *actually sold*, in descending gross
+   revenue order, each given an ABC revenue class, a price band, a volume band
+   and a return class, with the cumulative revenue share the ABC class is read
+   from printed on the same row.
+5. **`band-summary`** — how many products, units and pounds sit in each band of
+   each of those four classifications, and each band's share of the catalogue.
+
+### Why the classification needs its own stage
+
+A band on a product's own figures — its price, its volume — could in principle
+be assigned in the roll-up reducer. The ABC class could not: it is a property of
+where the product sits in the *whole* catalogue's revenue distribution, which no
+reducer handling one product can see. So `classify` runs with a single reducer
+that walks the catalogue in revenue order, exactly as the RFM scoring stage walks
+the customer population, and with the same cost: one short row per product held
+in memory, bounded by the size of the catalogue rather than by the number of
+transactions — about 4,000 rows for the UCI dataset.
+
+`band-summary` holds data too, but trivially: a share is a fraction of a total
+no single band's reduce group can see, so the bands are held until the groups are
+exhausted and written in `cleanup`. That is at most a few dozen rows for any
+dataset.
+
+### Products that never sold
+
+A stock code seen only on reversal lines has no selling price, no sold volume and
+no revenue to contribute. Classifying it would mean inventing figures for it, so
+it is excluded from `classify` and counted as `PRODUCTS_NEVER_SOLD_EXCLUDED`
+instead. It stays in `by_product` and in the return ranking, which is where it
+belongs.
+
+### Gross, not net, under the shares
+
+The revenue shares and the Pareto curve are taken over **gross** revenue. A
+cumulative share has to be monotonic to mean anything, and net revenue is
+negative for a product whose returns in the loaded period outweigh its sales, so
+a cumulative *net* share could fall as it went down the ranking. Net revenue is
+reported on every row beside the gross figure, so neither is hidden.
 
 ---
 
@@ -275,10 +315,10 @@ so a silent data problem cannot hide.
 | `validate` | `canonicalise` |
 | `customer_analysis` | `invoice-rollup`, `customer-rollup`, `rank` |
 | `monthly_sales` | `distinct-rollup`, `month-rollup` |
-| `product_analysis` | `invoice-rollup`, `product-rollup`, `rank-revenue`, `rank-quantity`, `rank-returns` |
+| `product_analysis` | `invoice-rollup`, `product-rollup`, `rank-revenue`, `rank-quantity`, `rank-returns`, `rank-reach`, `classify`, `band-summary` |
 | `country_analysis` | `distinct-rollup`, `country-rollup`, `rank` |
 | `repeat_customers` | `invoice-rollup`, `customer-rollup`, `cohort-summary` |
 | `rfm_analysis` | `invoice-rollup`, `customer-rollup`, `score`, `segment-summary` |
 
-**21 MapReduce jobs**, each with its own mapper, reducer and driver
-configuration. A run of all six analyses submits 20 YARN applications.
+**24 MapReduce jobs**, each with its own mapper, reducer and driver
+configuration. A run of all six analyses submits 23 YARN applications.

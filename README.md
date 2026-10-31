@@ -38,12 +38,12 @@ and read back for display.
 |---|---|---|
 | Customer spending | 3 | What each customer bought, returned and ultimately spent |
 | Monthly sales | 2 | How revenue, returns and customer activity moved month by month |
-| Product popularity | 5 | Which products sell, which earn, which come back |
+| Product popularity | 8 | Which products sell, which earn, which come back, and how the catalogue divides into classes and bands |
 | Country sales | 3 | Where the revenue comes from geographically |
 | Repeat customers | 3 | Who came back, how often, and what they were worth |
 | RFM segmentation | 4 | Recency, frequency and monetary scores, and the segment each implies |
 
-Plus the validation job that every dataset version passes through: **21
+Plus the validation job that every dataset version passes through: **24
 MapReduce jobs in total** across the catalogue.
 
 ---
@@ -196,7 +196,8 @@ docs/          Architecture, business rules, the MapReduce design, operations
 ## Tests
 
 ```bash
-make test-java      # 24 unit tests over the MapReduce logic
+make test-java      # 36 tests over the MapReduce logic, including a run of
+                    # the whole product chain on Hadoop's LocalJobRunner
 make test-api       # backend unit tests (profiling, registry, result parsing, generator)
 make typecheck-web  # frontend type check
 make test-e2e       # end-to-end against the running cluster

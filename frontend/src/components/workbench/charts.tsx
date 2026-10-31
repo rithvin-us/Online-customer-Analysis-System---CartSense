@@ -11,13 +11,19 @@ import {
   LineChart,
   Pie,
   PieChart,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from "recharts";
 
-import { formatCompact, formatCurrency, formatInteger } from "@/lib/format";
+import {
+  formatCompact,
+  formatCurrency,
+  formatInteger,
+  formatPercent,
+} from "@/lib/format";
 import { summariseMetrics } from "@/lib/summary";
 import { cn } from "@/lib/utils";
 
@@ -377,15 +383,30 @@ export function TopProductsChart({
   limit = 10,
 }: {
   rows: Row[];
-  metric: "net_revenue" | "quantity_sold" | "quantity_returned";
+  metric:
+    | "net_revenue"
+    | "gross_revenue"
+    | "quantity_sold"
+    | "quantity_returned"
+    | "distinct_invoices";
   limit?: number;
 }) {
   const titles = {
     net_revenue: "Top products by net revenue",
+    gross_revenue: "Top products by gross revenue",
     quantity_sold: "Top products by units sold",
     quantity_returned: "Products with the most returned units",
+    distinct_invoices: "Top products by orders appeared on",
   } as const;
-  const format = metric === "net_revenue" ? formatCurrency : formatInteger;
+  const format =
+    metric === "net_revenue" || metric === "gross_revenue" ? formatCurrency : formatInteger;
+  const valueLabels = {
+    net_revenue: "Net revenue",
+    gross_revenue: "Gross revenue",
+    quantity_sold: "Units",
+    quantity_returned: "Units",
+    distinct_invoices: "Orders",
+  } as const;
 
   const data = rows.slice(0, limit).map((row) => {
     const description = text(row, "description");
@@ -407,7 +428,7 @@ export function TopProductsChart({
       title={`${titles[metric].replace("Top products", `Top ${data.length} products`)}`}
       note="Keyed on StockCode; the description is a label only."
       data={data}
-      valueLabel={metric === "net_revenue" ? "Net revenue" : "Units"}
+      valueLabel={valueLabels[metric]}
       format={format}
       labelWidth={170}
     />
@@ -528,7 +549,9 @@ export function DonutChart({
           <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
             <span className="text-lg font-bold tracking-tight text-foreground">{centerValue}</span>
             {centerLabel && (
-              <span className="text-3xs font-medium text-muted-foreground">
+              // Constrained to the hole: a long band name wraps inside the
+              // donut instead of running out over the ring.
+              <span className="max-w-[88px] text-balance text-center text-3xs font-medium leading-tight text-muted-foreground">
                 {centerLabel}
               </span>
             )}
@@ -751,6 +774,271 @@ export function TopCustomerOrdersChart({ rows, limit = 10 }: { rows: Row[]; limi
       format={formatInteger}
       color={SERIES.three}
       labelWidth={90}
+    />
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Product classification
+// ---------------------------------------------------------------------------
+
+/**
+ * The Pareto curve: cumulative share of the sold catalogue's gross revenue
+ * against the revenue ranking.
+ *
+ * Both the share and the rank are columns of the `classify` stage's output, so
+ * the curve is drawn, not computed. The two dashed rules are the published ABC
+ * boundaries — they are where the class on each row changes, which makes the
+ * shape of the curve and the letter in the table the same statement.
+ *
+ * One series, so no legend: the title names it.
+ */
+export function ProductParetoChart({
+  rows,
+  totalProducts,
+}: {
+  rows: Row[];
+  totalProducts?: number | null;
+}) {
+  const data = rows
+    .map((row) => ({
+      rank: numeric(row, "rank"),
+      cumulative: numeric(row, "cumulative_revenue_share_pct"),
+      product: text(row, "description") || text(row, "stock_code"),
+      abc: text(row, "abc_class"),
+    }))
+    .sort((left, right) => left.rank - right.rank);
+
+  if (data.length < 2) return null;
+
+  const last = data[data.length - 1]!;
+  const shown = data.length;
+  // Never claim to have drawn the whole catalogue without knowing its size:
+  // the chart reads a fixed number of rows, which may be all of them or not.
+  const coverage = !totalProducts
+    ? `${formatInteger(shown)} classified products`
+    : totalProducts > shown
+      ? `the first ${formatInteger(shown)} of ${formatInteger(totalProducts)} classified products`
+      : `all ${formatInteger(shown)} classified products`;
+
+  return (
+    <ChartFrame
+      title="Cumulative revenue share by rank"
+      note={`Plotted over ${coverage}. The dashed rules at 80% and 95% are the ABC class boundaries.`}
+      height={250}
+    >
+      <ResponsiveContainer width="100%" height="88%">
+        <AreaChart data={data} margin={{ top: 8, right: 16, bottom: 4, left: 4 }}>
+          <CartesianGrid stroke={GRID} strokeWidth={1} vertical={false} />
+          <XAxis
+            dataKey="rank"
+            tick={AXIS_TICK}
+            stroke={GRID}
+            tickLine={false}
+            interval="preserveStartEnd"
+            minTickGap={28}
+            tickFormatter={(value: number) => formatCompact(value)}
+          />
+          <YAxis
+            tick={AXIS_TICK}
+            stroke={GRID}
+            tickLine={false}
+            width={40}
+            domain={[0, 100]}
+            ticks={[0, 20, 40, 60, 80, 100]}
+            tickFormatter={(value: number) => `${value}%`}
+          />
+          <ReferenceLine y={80} stroke={AXIS_INK} strokeDasharray="3 3" strokeWidth={1} />
+          <ReferenceLine y={95} stroke={AXIS_INK} strokeDasharray="3 3" strokeWidth={1} />
+          <Tooltip
+            cursor={{ stroke: AXIS_INK, strokeWidth: 1 }}
+            content={({ active, payload }) => {
+              if (!active || !payload || payload.length === 0) return null;
+              const datum = payload[0]?.payload as {
+                rank: number;
+                cumulative: number;
+                product: string;
+                abc: string;
+              };
+              return (
+                <div className="rounded-md border border-border bg-surface-raised px-2.5 py-1.5 text-2xs shadow-md">
+                  <p className="font-medium text-foreground">
+                    #{formatInteger(datum.rank)} {datum.product}
+                  </p>
+                  <p className="text-muted-foreground">
+                    {formatPercent(datum.cumulative, 2)} cumulative · class {datum.abc}
+                  </p>
+                </div>
+              );
+            }}
+          />
+          <Area
+            type="monotone"
+            dataKey="cumulative"
+            name="Cumulative revenue share"
+            stroke={SERIES.one}
+            fill={SERIES.one}
+            fillOpacity={0.18}
+            strokeWidth={2}
+            dot={false}
+            activeDot={{ r: 4, strokeWidth: 2, stroke: SURFACE }}
+          />
+        </AreaChart>
+      </ResponsiveContainer>
+      <p className="pt-1 text-2xs text-muted-foreground">
+        The top {formatInteger(shown)} products account for{" "}
+        {formatPercent(last.cumulative, 2)} of the sold catalogue&apos;s gross revenue.
+      </p>
+    </ChartFrame>
+  );
+}
+
+/**
+ * The four classification dimensions of the band summary.
+ *
+ * The display order of the dimensions, and the title and gloss of each, are the
+ * only things decided here. Which bands exist, how many products are in each,
+ * and every share came out of the `band-summary` reducer; the bands are drawn
+ * in the reporting order that stage assigned them rather than re-sorted by
+ * size, because a band order that moved with the data would make two runs hard
+ * to compare.
+ */
+const CLASSIFICATION_DIMENSIONS = [
+  {
+    key: "abc_class",
+    title: "ABC revenue class",
+    note:
+      "A while the products above have not reached 80% of gross revenue, B up to 95%, then C.",
+  },
+  {
+    key: "price_band",
+    title: "Price band",
+    note: "By average unit price: a product's gross revenue divided by the units it sold.",
+  },
+  {
+    key: "volume_band",
+    title: "Volume band",
+    note: "By units sold.",
+  },
+  {
+    key: "return_class",
+    title: "Return class",
+    note: "By returned units as a share of the units handled.",
+  },
+] as const;
+
+export function ClassificationBandCharts({ rows }: { rows: Row[] }) {
+  const groups = CLASSIFICATION_DIMENSIONS.map((dimension) => ({
+    ...dimension,
+    bands: rows
+      .filter((row) => text(row, "dimension") === dimension.key)
+      .sort((left, right) => numeric(left, "ordinal") - numeric(right, "ordinal")),
+  })).filter((group) => group.bands.length > 0);
+
+  if (groups.length === 0) return null;
+
+  return (
+    <div className="space-y-6">
+      {groups.map((group) => {
+        const slices = group.bands.map((row, index) => ({
+          label: text(row, "band"),
+          value: numeric(row, "gross_revenue"),
+          percent: numeric(row, "revenue_share_pct"),
+          color: PALETTE[index % PALETTE.length]!,
+        }));
+        const products = group.bands.map((row) => {
+          const band = text(row, "band");
+          return {
+            label: band.length > 22 ? `${band.slice(0, 21)}…` : band,
+            full: band,
+            value: numeric(row, "products"),
+          };
+        });
+        const headline = slices.reduce(
+          (best, slice) => (slice.percent > best.percent ? slice : best),
+          slices[0]!,
+        );
+
+        return (
+          <section key={group.key}>
+            <div className="pb-2">
+              <p className="text-xs font-medium">{group.title}</p>
+              <p className="pt-0.5 text-2xs text-muted-foreground">{group.note}</p>
+            </div>
+            <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-2">
+              <DonutChart
+                title="Share of gross revenue"
+                note="Shares as the band-summary reducer reported them."
+                data={slices}
+                format={formatCurrency}
+                centerValue={formatPercent(headline.percent)}
+                centerLabel={headline.label}
+                height={248}
+              />
+              <RankedBars
+                title="Products in each band"
+                note="In reporting order, not sorted by size."
+                data={products}
+                valueLabel="Products"
+                format={formatInteger}
+                color={SERIES.three}
+                labelWidth={140}
+              />
+            </div>
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Counters
+// ---------------------------------------------------------------------------
+
+/**
+ * A bar chart over Hadoop counters.
+ *
+ * A counter is a count of records, so the only thing a chart adds is the
+ * comparison between them — which is why the bars are ordered by size and the
+ * zero counters are left out instead of drawn as empty rows.
+ */
+export function CounterBars({
+  title,
+  note,
+  items,
+  valueLabel,
+  color = SERIES.one,
+  labelWidth = 170,
+}: {
+  title: string;
+  note?: string;
+  items: { label: string; value: number | null }[];
+  valueLabel: string;
+  color?: string;
+  labelWidth?: number;
+}) {
+  const data = items
+    .filter((item): item is { label: string; value: number } =>
+      typeof item.value === "number" && item.value > 0)
+    .map((item) => ({
+      label: item.label.length > 24 ? `${item.label.slice(0, 23)}…` : item.label,
+      full: item.label,
+      value: item.value,
+    }))
+    .sort((left, right) => right.value - left.value);
+
+  if (data.length === 0) return null;
+
+  return (
+    <RankedBars
+      title={title}
+      note={note}
+      data={data}
+      valueLabel={valueLabel}
+      format={formatInteger}
+      color={color}
+      labelWidth={labelWidth}
     />
   );
 }

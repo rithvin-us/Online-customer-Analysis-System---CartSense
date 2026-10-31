@@ -6,10 +6,12 @@ import { Button } from "@/components/ui/button";
 import { ResultTable } from "./result-table";
 import { ErrorState, LoadingRow } from "./states";
 import {
+  ClassificationBandCharts,
   CountryMarketShareChart,
   LoyaltyBreakdownChart,
   MonthlyOrderVolumeChart,
   MonthlyRevenueChart,
+  ProductParetoChart,
   SegmentChart,
   SegmentShareChart,
   TopCountriesChart,
@@ -27,6 +29,12 @@ import type { ResultSetSummary } from "@/lib/types";
 const PAGE_SIZE = 100;
 /** Rows to read for a chart. Charts show a ranking's head, not the whole file. */
 const CHART_ROWS = 60;
+/**
+ * The Pareto curve is the exception: its whole point is the shape of the
+ * distribution, so it reads far enough down the ranking to show one. It still
+ * states how much of the catalogue it drew.
+ */
+const PARETO_ROWS = 1_000;
 
 /**
  * One analysis's results: an output selector, a chart where one helps, and the
@@ -61,15 +69,19 @@ export function AnalysisResults({
     { enabled: Boolean(outputName), deps: [runId, analysis, outputName, offset] },
   );
 
+  const kind = chartKind(analysis, outputName ?? "");
+
   // A chart reads the head of the result independently of the table's paging,
   // so paging through rows does not change what the chart shows.
   const chartSource = useResource(
-    () => getResult(runId, analysis, outputName!, CHART_ROWS, 0),
+    () => getResult(runId, analysis, outputName!, chartRows(kind), 0),
     {
-      enabled: Boolean(outputName) && chartKind(analysis, outputName ?? "") !== null,
+      enabled: Boolean(outputName) && kind !== null,
       deps: [runId, analysis, outputName],
     },
   );
+
+  const rowCount = outputs.find((output) => output.name === outputName)?.row_count ?? null;
 
   if (outputs.length === 0) {
     return (
@@ -107,9 +119,9 @@ export function AnalysisResults({
       ) : page.data ? (
         <div className={page.refreshing ? "opacity-60 transition-opacity" : undefined}>
           {renderChart(
-            analysis,
-            outputName ?? "",
+            kind,
             chartSource.data?.rows?.length ? chartSource.data.rows : page.data.rows,
+            rowCount,
           )}
           <div className="mt-4 overflow-hidden rounded-md border border-border">
             <ResultTable
@@ -136,7 +148,7 @@ function preferredOutput(analysis: string, outputs: ResultSetSummary[]): string 
   const order: Record<string, string[]> = {
     customer_analysis: ["ranked_by_net_spending", "by_customer"],
     monthly_sales: ["by_month"],
-    product_analysis: ["ranked_by_net_revenue", "by_product"],
+    product_analysis: ["classified_products", "ranked_by_net_revenue", "by_product"],
     country_analysis: ["ranked_by_net_revenue", "by_country"],
     repeat_customers: ["summary", "by_customer"],
     rfm_analysis: ["by_segment", "by_customer"],
@@ -154,6 +166,9 @@ type ChartKind =
   | "products_revenue"
   | "products_quantity"
   | "products_returns"
+  | "products_reach"
+  | "products_pareto"
+  | "products_bands"
   | "segments"
   | "loyalty";
 
@@ -167,18 +182,25 @@ function chartKind(analysis: string, output: string): ChartKind | null {
     if (output === "ranked_by_net_revenue") return "products_revenue";
     if (output === "ranked_by_quantity_sold") return "products_quantity";
     if (output === "ranked_by_quantity_returned") return "products_returns";
+    if (output === "ranked_by_distinct_invoices") return "products_reach";
+    if (output === "classified_products") return "products_pareto";
+    if (output === "by_classification") return "products_bands";
   }
   if (analysis === "rfm_analysis" && output === "by_segment") return "segments";
   if (analysis === "repeat_customers" && output === "summary") return "loyalty";
   return null;
 }
 
+/** How much of a result a chart of this kind needs to read. */
+function chartRows(kind: ChartKind | null): number {
+  return kind === "products_pareto" ? PARETO_ROWS : CHART_ROWS;
+}
+
 function renderChart(
-  analysis: string,
-  output: string,
+  kind: ChartKind | null,
   rows: Record<string, string | number | null>[],
+  rowCount: number | null,
 ) {
-  const kind = chartKind(analysis, output);
   if (!kind || rows.length === 0) return null;
 
   const chart = (() => {
@@ -224,6 +246,17 @@ function renderChart(
         return <TopProductsChart rows={rows} metric="quantity_sold" />;
       case "products_returns":
         return <TopProductsChart rows={rows} metric="quantity_returned" />;
+      case "products_reach":
+        return <TopProductsChart rows={rows} metric="distinct_invoices" />;
+      case "products_pareto":
+        return (
+          <div className="space-y-4">
+            <ProductParetoChart rows={rows} totalProducts={rowCount} />
+            <TopProductsChart rows={rows} metric="gross_revenue" />
+          </div>
+        );
+      case "products_bands":
+        return <ClassificationBandCharts rows={rows} />;
       default:
         return null;
     }

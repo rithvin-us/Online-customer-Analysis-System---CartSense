@@ -90,7 +90,7 @@ reducer count and split size are visible, then submit all six.
 
 Switch to the YARN ResourceManager at <http://localhost:8088> while it runs. The
 applications appear one after another, named
-`cartscope:<analysis>:<stage>:<run_id>`. A run of all six submits **20 YARN
+`cartscope:<analysis>:<stage>:<run_id>`. A run of all six submits **23 YARN
 applications**.
 
 **Screen** — the run page. The stage chain for each analysis, each stage carrying

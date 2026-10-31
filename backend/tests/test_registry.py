@@ -114,3 +114,57 @@ def test_only_rfm_is_optional() -> None:
 def test_unknown_output_raises() -> None:
     with pytest.raises(KeyError):
         registry.get_analysis("monthly_sales").output("nope")
+
+
+def test_product_classification_layouts_match_the_reducers() -> None:
+    # These two layouts are written by ProductPopularityJob's classify and
+    # band-summary reducers. The order is the contract between them and the
+    # reader, so it is pinned here rather than only described in a docstring.
+    products = registry.get_analysis("product_analysis")
+    assert products.output("classified_products").column_names == (
+        "rank",
+        "stock_code",
+        "gross_revenue",
+        "net_revenue",
+        "quantity_sold",
+        "quantity_returned",
+        "distinct_invoices",
+        "average_unit_price",
+        "return_rate_pct",
+        "revenue_share_pct",
+        "cumulative_revenue_share_pct",
+        "abc_class",
+        "price_band",
+        "volume_band",
+        "return_class",
+        "description",
+    )
+    assert products.output("by_classification").column_names == (
+        "dimension",
+        "band",
+        "ordinal",
+        "products",
+        "product_share_pct",
+        "quantity_sold",
+        "quantity_returned",
+        "gross_revenue",
+        "net_revenue",
+        "revenue_share_pct",
+        "average_unit_price",
+    )
+
+
+def test_every_product_ranking_has_a_stage_behind_it() -> None:
+    # A ranked output with no ranking stage would be an output nothing writes.
+    products = registry.get_analysis("product_analysis")
+    stages = {stage.name for stage in products.stages}
+    assert {"rank-revenue", "rank-quantity", "rank-returns", "rank-reach",
+            "classify", "band-summary"} <= stages
+    ranked = {output.name for output in products.outputs if output.ranked}
+    assert ranked == {
+        "ranked_by_net_revenue",
+        "ranked_by_quantity_sold",
+        "ranked_by_quantity_returned",
+        "ranked_by_distinct_invoices",
+        "classified_products",
+    }

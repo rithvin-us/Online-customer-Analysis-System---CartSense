@@ -1,5 +1,6 @@
+import { CounterBars, DonutChart } from "./charts";
 import { Field, FieldGrid } from "./field";
-import { formatInteger } from "@/lib/format";
+import { formatCompact, formatInteger } from "@/lib/format";
 
 /**
  * How the Hadoop validation job classified the records.
@@ -90,6 +91,8 @@ export function ClassificationPanel({
 
   return (
     <div className="space-y-5">
+      <ClassificationCharts counters={counters} />
+
       <section>
         <p className="pb-2.5 text-xs font-medium">Classified</p>
         <FieldGrid>
@@ -118,6 +121,87 @@ export function ClassificationPanel({
         revenue is gross less returns. Because each record carries exactly one class, a
         cancelled negative-quantity line is counted as a reversal once and never twice.
       </p>
+    </div>
+  );
+}
+
+/**
+ * The same counters as the fields below, drawn.
+ *
+ * Two charts, because the counters answer two different questions and mixing
+ * them would invite a false comparison:
+ *
+ *  - how the *accepted* records divide. A record is classified either a
+ *    fulfilled sale or a reversal and never both, so these two counters add up
+ *    to ACCEPTED_RECORDS exactly and a share of the whole is a true statement
+ *    about them;
+ *  - which rule rejected the records that did not get that far. Each rejected
+ *    record is counted under exactly one rule, so the bars are a partition of
+ *    the rejections, not overlapping tallies.
+ *
+ * Counters that overlap those classes — lines without a CustomerID, which are
+ * accepted and kept, and the duplicate copies the reducer collapsed — are left
+ * to the fields below rather than drawn as if they were another slice.
+ */
+function ClassificationCharts({
+  counters,
+}: {
+  counters: Record<string, number | null>;
+}) {
+  const sales = counters.FULFILLED_SALES ?? 0;
+  const reversals = counters.RETURNS_AND_CANCELLATIONS ?? 0;
+  const accepted = counters.ACCEPTED_RECORDS ?? sales + reversals;
+
+  const classes =
+    accepted > 0
+      ? [
+          {
+            label: "Fulfilled sales",
+            value: sales,
+            color: "hsl(var(--series-1))",
+            percent: (sales / accepted) * 100,
+          },
+          {
+            label: "Returns and cancellations",
+            value: reversals,
+            color: "hsl(var(--series-2))",
+            percent: (reversals / accepted) * 100,
+          },
+        ].filter((slice) => slice.value > 0)
+      : [];
+
+  const rejections = REJECTED.map((entry) => ({
+    label: entry.label,
+    value: counters[entry.key] ?? null,
+  }));
+
+  const hasRejections = rejections.some(
+    (entry) => typeof entry.value === "number" && entry.value > 0,
+  );
+
+  if (classes.length === 0 && !hasRejections) return null;
+
+  return (
+    <div className="grid grid-cols-1 items-start gap-4 rounded-md border border-border bg-surface px-4 py-3 lg:grid-cols-2">
+      {classes.length > 0 && (
+        <DonutChart
+          title="Accepted records by class"
+          note="Each accepted record carries exactly one class, so these add up to the accepted total."
+          data={classes}
+          format={formatInteger}
+          centerValue={formatCompact(accepted)}
+          centerLabel="Accepted"
+          height={238}
+        />
+      )}
+      <CounterBars
+        title="Rejections by rule"
+        note="One rule per rejected record. Rules that rejected nothing are not drawn."
+        items={rejections}
+        valueLabel="Records"
+        color="hsl(var(--series-2))"
+        labelWidth={150}
+      />
     </div>
   );
 }
